@@ -9,6 +9,12 @@ perf.data
 /.tmp/
 *.log
 .DS_Store
+._*
+
+# Original source images (keep only compressed .webp)
+*.png
+*.bmp
+*.tiff
 
 # Python caches
 __pycache__/

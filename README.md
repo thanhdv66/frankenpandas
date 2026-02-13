@@ -1,5 +1,9 @@
 # FrankenPandas
 
+<div align="center">
+  <img src="frankenpandas_illustration.webp" alt="FrankenPandas - Clean-room Rust reimplementation of pandas">
+</div>
+
 FrankenPandas is a clean-room Rust reimplementation targeting grand-scope excellence: semantic fidelity, mathematical rigor, operational safety, and profile-proven performance.
 
 ## What Makes This Project Special
