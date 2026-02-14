@@ -97,6 +97,13 @@ fn detect_sort_order(labels: &[IndexLabel]) -> SortOrder {
     SortOrder::Unsorted
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DuplicateKeep {
+    First,
+    Last,
+    None,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Index {
     labels: Vec<IndexLabel>,
@@ -237,6 +244,187 @@ impl Index {
             positions.entry(label).or_insert(idx);
         }
         positions
+    }
+
+    // ── Pandas Index Model: lookup and membership ──────────────────────
+
+    #[must_use]
+    pub fn contains(&self, label: &IndexLabel) -> bool {
+        self.position(label).is_some()
+    }
+
+    #[must_use]
+    pub fn get_indexer(&self, target: &Index) -> Vec<Option<usize>> {
+        let map = self.position_map_first_ref();
+        target
+            .labels
+            .iter()
+            .map(|label| map.get(label).copied())
+            .collect()
+    }
+
+    #[must_use]
+    pub fn isin(&self, values: &[IndexLabel]) -> Vec<bool> {
+        let set: HashMap<&IndexLabel, ()> = values.iter().map(|v| (v, ())).collect();
+        self.labels.iter().map(|l| set.contains_key(l)).collect()
+    }
+
+    // ── Pandas Index Model: deduplication ──────────────────────────────
+
+    #[must_use]
+    pub fn unique(&self) -> Self {
+        let mut seen = HashMap::<&IndexLabel, ()>::new();
+        let labels: Vec<IndexLabel> = self
+            .labels
+            .iter()
+            .filter(|l| seen.insert(l, ()).is_none())
+            .cloned()
+            .collect();
+        Self::new(labels)
+    }
+
+    #[must_use]
+    pub fn duplicated(&self, keep: DuplicateKeep) -> Vec<bool> {
+        let mut result = vec![false; self.labels.len()];
+        match keep {
+            DuplicateKeep::First => {
+                let mut seen = HashMap::<&IndexLabel, ()>::new();
+                for (i, label) in self.labels.iter().enumerate() {
+                    if seen.insert(label, ()).is_some() {
+                        result[i] = true;
+                    }
+                }
+            }
+            DuplicateKeep::Last => {
+                let mut seen = HashMap::<&IndexLabel, ()>::new();
+                for (i, label) in self.labels.iter().enumerate().rev() {
+                    if seen.insert(label, ()).is_some() {
+                        result[i] = true;
+                    }
+                }
+            }
+            DuplicateKeep::None => {
+                let mut counts = HashMap::<&IndexLabel, usize>::new();
+                for label in &self.labels {
+                    *counts.entry(label).or_insert(0) += 1;
+                }
+                for (i, label) in self.labels.iter().enumerate() {
+                    if counts[label] > 1 {
+                        result[i] = true;
+                    }
+                }
+            }
+        }
+        result
+    }
+
+    #[must_use]
+    pub fn drop_duplicates(&self) -> Self {
+        self.unique()
+    }
+
+    // ── Pandas Index Model: set operations ─────────────────────────────
+
+    #[must_use]
+    pub fn intersection(&self, other: &Self) -> Self {
+        let other_set = other.position_map_first_ref();
+        let mut seen = HashMap::<&IndexLabel, ()>::new();
+        let labels: Vec<IndexLabel> = self
+            .labels
+            .iter()
+            .filter(|l| other_set.contains_key(l) && seen.insert(l, ()).is_none())
+            .cloned()
+            .collect();
+        Self::new(labels)
+    }
+
+    #[must_use]
+    pub fn union_with(&self, other: &Self) -> Self {
+        let mut seen = HashMap::<&IndexLabel, ()>::new();
+        let mut labels = Vec::with_capacity(self.labels.len() + other.labels.len());
+        for label in self.labels.iter().chain(other.labels.iter()) {
+            if seen.insert(label, ()).is_none() {
+                labels.push(label.clone());
+            }
+        }
+        Self::new(labels)
+    }
+
+    #[must_use]
+    pub fn difference(&self, other: &Self) -> Self {
+        let other_set = other.position_map_first_ref();
+        let mut seen = HashMap::<&IndexLabel, ()>::new();
+        let labels: Vec<IndexLabel> = self
+            .labels
+            .iter()
+            .filter(|l| !other_set.contains_key(l) && seen.insert(l, ()).is_none())
+            .cloned()
+            .collect();
+        Self::new(labels)
+    }
+
+    #[must_use]
+    pub fn symmetric_difference(&self, other: &Self) -> Self {
+        let self_set = self.position_map_first_ref();
+        let other_set = other.position_map_first_ref();
+        let mut seen = HashMap::<&IndexLabel, ()>::new();
+        let mut labels = Vec::new();
+        for label in &self.labels {
+            if !other_set.contains_key(label) && seen.insert(label, ()).is_none() {
+                labels.push(label.clone());
+            }
+        }
+        for label in &other.labels {
+            if !self_set.contains_key(label) && seen.insert(label, ()).is_none() {
+                labels.push(label.clone());
+            }
+        }
+        Self::new(labels)
+    }
+
+    // ── Pandas Index Model: ordering and slicing ───────────────────────
+
+    #[must_use]
+    pub fn argsort(&self) -> Vec<usize> {
+        let mut indices: Vec<usize> = (0..self.labels.len()).collect();
+        indices.sort_by(|&a, &b| self.labels[a].cmp(&self.labels[b]));
+        indices
+    }
+
+    #[must_use]
+    pub fn sort_values(&self) -> Self {
+        let order = self.argsort();
+        Self::new(order.iter().map(|&i| self.labels[i].clone()).collect())
+    }
+
+    #[must_use]
+    pub fn take(&self, indices: &[usize]) -> Self {
+        Self::new(indices.iter().map(|&i| self.labels[i].clone()).collect())
+    }
+
+    #[must_use]
+    pub fn slice(&self, start: usize, len: usize) -> Self {
+        let end = (start + len).min(self.labels.len());
+        let start = start.min(self.labels.len());
+        Self::new(self.labels[start..end].to_vec())
+    }
+
+    #[must_use]
+    pub fn from_range(start: i64, stop: i64, step: i64) -> Self {
+        let mut labels = Vec::new();
+        let mut val = start;
+        if step > 0 {
+            while val < stop {
+                labels.push(IndexLabel::Int64(val));
+                val += step;
+            }
+        } else if step < 0 {
+            while val > stop {
+                labels.push(IndexLabel::Int64(val));
+                val += step;
+            }
+        }
+        Self::new(labels)
     }
 }
 
@@ -647,5 +835,245 @@ mod tests {
 
         let plan = align_left(&left, &right);
         assert!(plan.union_index.is_empty());
+    }
+
+    // === bd-2gi.13: Index model and indexer semantics ===
+
+    use super::DuplicateKeep;
+
+    #[test]
+    fn contains_finds_existing_label() {
+        let index = Index::from_i64(vec![10, 20, 30]);
+        assert!(index.contains(&IndexLabel::Int64(20)));
+        assert!(!index.contains(&IndexLabel::Int64(99)));
+    }
+
+    #[test]
+    fn get_indexer_bulk_lookup() {
+        let index = Index::new(vec!["a".into(), "b".into(), "c".into()]);
+        let target = Index::new(vec!["c".into(), "a".into(), "z".into()]);
+        assert_eq!(index.get_indexer(&target), vec![Some(2), Some(0), None]);
+    }
+
+    #[test]
+    fn isin_membership_mask() {
+        let index = Index::from_i64(vec![1, 2, 3, 4, 5]);
+        let values = vec![IndexLabel::Int64(2), IndexLabel::Int64(4)];
+        assert_eq!(index.isin(&values), vec![false, true, false, true, false]);
+    }
+
+    #[test]
+    fn unique_preserves_first_seen_order() {
+        let index = Index::new(vec![
+            "b".into(),
+            "a".into(),
+            "b".into(),
+            "c".into(),
+            "a".into(),
+        ]);
+        let uniq = index.unique();
+        assert_eq!(
+            uniq.labels(),
+            &["b".into(), "a".into(), "c".into()]
+        );
+    }
+
+    #[test]
+    fn duplicated_keep_first() {
+        let index = Index::from_i64(vec![1, 2, 1, 3, 2]);
+        assert_eq!(
+            index.duplicated(DuplicateKeep::First),
+            vec![false, false, true, false, true]
+        );
+    }
+
+    #[test]
+    fn duplicated_keep_last() {
+        let index = Index::from_i64(vec![1, 2, 1, 3, 2]);
+        assert_eq!(
+            index.duplicated(DuplicateKeep::Last),
+            vec![true, true, false, false, false]
+        );
+    }
+
+    #[test]
+    fn duplicated_keep_none_marks_all() {
+        let index = Index::from_i64(vec![1, 2, 1, 3, 2]);
+        assert_eq!(
+            index.duplicated(DuplicateKeep::None),
+            vec![true, true, true, false, true]
+        );
+    }
+
+    #[test]
+    fn drop_duplicates_equals_unique() {
+        let index = Index::from_i64(vec![3, 1, 3, 2, 1]);
+        assert_eq!(index.drop_duplicates(), index.unique());
+    }
+
+    #[test]
+    fn intersection_preserves_left_order() {
+        let left = Index::new(vec!["c".into(), "a".into(), "b".into()]);
+        let right = Index::new(vec!["b".into(), "d".into(), "a".into()]);
+        let result = left.intersection(&right);
+        assert_eq!(result.labels(), &["a".into(), "b".into()]);
+    }
+
+    #[test]
+    fn intersection_deduplicates() {
+        let left = Index::from_i64(vec![1, 1, 2]);
+        let right = Index::from_i64(vec![1, 2, 2]);
+        let result = left.intersection(&right);
+        assert_eq!(result.labels(), &[IndexLabel::Int64(1), IndexLabel::Int64(2)]);
+    }
+
+    #[test]
+    fn union_with_combines_unique_labels() {
+        let left = Index::from_i64(vec![1, 2, 3]);
+        let right = Index::from_i64(vec![2, 4, 3]);
+        let result = left.union_with(&right);
+        assert_eq!(
+            result.labels(),
+            &[
+                IndexLabel::Int64(1),
+                IndexLabel::Int64(2),
+                IndexLabel::Int64(3),
+                IndexLabel::Int64(4),
+            ]
+        );
+    }
+
+    #[test]
+    fn difference_removes_other_labels() {
+        let left = Index::from_i64(vec![1, 2, 3, 4]);
+        let right = Index::from_i64(vec![2, 4]);
+        let result = left.difference(&right);
+        assert_eq!(
+            result.labels(),
+            &[IndexLabel::Int64(1), IndexLabel::Int64(3)]
+        );
+    }
+
+    #[test]
+    fn symmetric_difference_xor() {
+        let left = Index::from_i64(vec![1, 2, 3]);
+        let right = Index::from_i64(vec![2, 3, 4]);
+        let result = left.symmetric_difference(&right);
+        assert_eq!(
+            result.labels(),
+            &[IndexLabel::Int64(1), IndexLabel::Int64(4)]
+        );
+    }
+
+    #[test]
+    fn argsort_returns_sorting_indices() {
+        let index = Index::from_i64(vec![30, 10, 20]);
+        assert_eq!(index.argsort(), vec![1, 2, 0]);
+    }
+
+    #[test]
+    fn sort_values_produces_sorted_index() {
+        let index = Index::new(vec!["c".into(), "a".into(), "b".into()]);
+        let sorted = index.sort_values();
+        assert_eq!(
+            sorted.labels(),
+            &["a".into(), "b".into(), "c".into()]
+        );
+    }
+
+    #[test]
+    fn take_selects_by_position() {
+        let index = Index::from_i64(vec![10, 20, 30, 40, 50]);
+        let taken = index.take(&[4, 0, 2]);
+        assert_eq!(
+            taken.labels(),
+            &[
+                IndexLabel::Int64(50),
+                IndexLabel::Int64(10),
+                IndexLabel::Int64(30),
+            ]
+        );
+    }
+
+    #[test]
+    fn slice_extracts_subrange() {
+        let index = Index::from_i64(vec![10, 20, 30, 40, 50]);
+        let sliced = index.slice(1, 3);
+        assert_eq!(
+            sliced.labels(),
+            &[
+                IndexLabel::Int64(20),
+                IndexLabel::Int64(30),
+                IndexLabel::Int64(40),
+            ]
+        );
+    }
+
+    #[test]
+    fn slice_clamps_to_bounds() {
+        let index = Index::from_i64(vec![1, 2, 3]);
+        let sliced = index.slice(1, 100);
+        assert_eq!(
+            sliced.labels(),
+            &[IndexLabel::Int64(2), IndexLabel::Int64(3)]
+        );
+    }
+
+    #[test]
+    fn from_range_basic() {
+        let index = Index::from_range(0, 5, 1);
+        assert_eq!(
+            index.labels(),
+            &[
+                IndexLabel::Int64(0),
+                IndexLabel::Int64(1),
+                IndexLabel::Int64(2),
+                IndexLabel::Int64(3),
+                IndexLabel::Int64(4),
+            ]
+        );
+    }
+
+    #[test]
+    fn from_range_step_2() {
+        let index = Index::from_range(0, 10, 3);
+        assert_eq!(
+            index.labels(),
+            &[
+                IndexLabel::Int64(0),
+                IndexLabel::Int64(3),
+                IndexLabel::Int64(6),
+                IndexLabel::Int64(9),
+            ]
+        );
+    }
+
+    #[test]
+    fn from_range_negative_step() {
+        let index = Index::from_range(5, 0, -2);
+        assert_eq!(
+            index.labels(),
+            &[
+                IndexLabel::Int64(5),
+                IndexLabel::Int64(3),
+                IndexLabel::Int64(1),
+            ]
+        );
+    }
+
+    #[test]
+    fn from_range_empty_when_step_zero() {
+        let index = Index::from_range(0, 5, 0);
+        assert!(index.is_empty());
+    }
+
+    #[test]
+    fn set_ops_empty_inputs() {
+        let empty = Index::new(Vec::new());
+        let non_empty = Index::from_i64(vec![1, 2]);
+        assert!(empty.intersection(&non_empty).is_empty());
+        assert_eq!(empty.union_with(&non_empty), non_empty);
+        assert!(empty.difference(&non_empty).is_empty());
+        assert_eq!(empty.symmetric_difference(&non_empty), non_empty);
     }
 }
