@@ -84,6 +84,20 @@ CRITICAL NON-REGRESSION RULE:
 
 Index alignment and null/NaN semantics are sacred. Never trade semantic parity for speed.
 
+## Feature Parity Mandate (NON-NEGOTIABLE)
+
+FrankenPandas targets ABSOLUTE AND TOTAL feature and functionality overlap with pandas. This is a true drop-in replacement, not a minimal subset or toy reimplementation. Every DataFrame, Series, Index, GroupBy, IO, merge, reshape, window, string, datetime, categorical, and expression operation in the pandas API surface must be supported.
+
+What this means in practice:
+
+1. NO feature is out of scope. If pandas does it, FrankenPandas must do it.
+2. Clean-room implementation only. We never copy pandas source code. We extract the behavioral essence (input/output contracts, edge-case semantics, dtype promotion rules) and rebuild from first principles using alien-artifact-coding, extreme-software-optimization, and alien-graveyard techniques.
+3. Every bead, plan, and design document must be written with full coverage in mind. Do not design for a "v1 subset" -- design for the complete API surface from the start, even if implementation is phased.
+4. Conformance is verified via differential testing against the pandas oracle for the FULL API surface, not just a cherry-picked subset.
+5. Performance must EXCEED pandas across the board, not merely match it.
+
+This mandate applies to all planning, all beads, all architecture decisions, and all implementation work. No exceptions.
+
 ---
 
 ## Architecture (Target)
