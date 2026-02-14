@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "frankenpandas/drift_history_entry",
+  "title": "Drift History Entry",
+  "description": "Single JSONL row in drift_history.jsonl. Maps to fp_conformance::PacketDriftHistoryEntry. FROZEN per bd-2gi.3.",
+  "type": "object",
+  "required": [
+    "ts_unix_ms", "packet_id", "suite",
+    "fixture_count", "passed", "failed",
+    "strict_failed", "hardened_failed",
+    "gate_pass", "report_hash"
+  ],
+  "properties": {
+    "ts_unix_ms": {
+      "$ref": "shared_definitions.schema.json#/$defs/UnixTimestampMs",
+      "description": "Timestamp of this drift history snapshot."
+    },
+    "packet_id": {
+      "type": "string",
+      "pattern": "^FP-P2C-[0-9]{3}$"
+    },
+    "suite": {
+      "type": "string",
+      "description": "Suite identifier (e.g., 'phase2c_packets:FP-P2C-001')."
+    },
+    "fixture_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "passed": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "failed": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "strict_failed": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "hardened_failed": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "gate_pass": {
+      "type": "boolean",
+      "description": "Whether the parity gate was green at this snapshot."
+    },
+    "report_hash": {
+      "$ref": "shared_definitions.schema.json#/$defs/Sha256Hash",
+      "description": "SHA-256 of the parity report used for this entry."
+    }
+  },
+  "additionalProperties": false
+}

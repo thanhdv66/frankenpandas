@@ -375,6 +375,178 @@ impl RaptorQEnvelope {
     }
 }
 
+// === Conformal Calibration for Decision Engine (bd-2t5e.9, AG-09) ===
+
+/// Nonconformity score computed from a single decision record.
+/// Higher score = more "strange" relative to calibration window.
+fn nonconformity_score(record: &DecisionRecord) -> f64 {
+    // Score is the absolute log-posterior-odds: high when decision is extreme
+    let p = record.metrics.posterior_compatible.clamp(1e-15, 1.0 - 1e-15);
+    (p / (1.0 - p)).ln().abs()
+}
+
+/// Conformal prediction set: which actions are admissible at significance level alpha.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ConformalPredictionSet {
+    /// The conformal quantile threshold at significance level alpha.
+    pub quantile_threshold: f64,
+    /// The nonconformity score of the current decision.
+    pub current_score: f64,
+    /// Whether the Bayesian argmin action is inside the conformal set.
+    pub bayesian_action_in_set: bool,
+    /// Actions that are admissible (score <= threshold).
+    pub admissible_actions: Vec<DecisionAction>,
+    /// Empirical coverage rate over the calibration window.
+    pub empirical_coverage: f64,
+}
+
+/// Calibration window for conformal guard.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConformalGuard {
+    /// Rolling window of nonconformity scores.
+    scores: Vec<f64>,
+    /// Maximum window size.
+    window_size: usize,
+    /// Significance level (e.g., 0.1 for 90% coverage).
+    alpha: f64,
+    /// Count of decisions where Bayesian action was in the conformal set.
+    in_set_count: usize,
+    /// Total decisions evaluated.
+    total_count: usize,
+}
+
+impl ConformalGuard {
+    /// Create a new conformal guard with the given window size and significance level.
+    #[must_use]
+    pub fn new(window_size: usize, alpha: f64) -> Self {
+        Self {
+            scores: Vec::with_capacity(window_size),
+            window_size,
+            alpha: alpha.clamp(0.01, 0.5),
+            in_set_count: 0,
+            total_count: 0,
+        }
+    }
+
+    /// Default: 1000-element window, alpha=0.1 (90% coverage guarantee).
+    #[must_use]
+    pub fn default_config() -> Self {
+        Self::new(1000, 0.1)
+    }
+
+    /// Compute the conformal quantile from the calibration window.
+    /// Returns None if the window has fewer than 2 scores.
+    #[must_use]
+    pub fn conformal_quantile(&self) -> Option<f64> {
+        if self.scores.len() < 2 {
+            return None;
+        }
+        let mut sorted: Vec<f64> = self.scores.clone();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        // Quantile at level (1 - alpha)(1 + 1/n) per split conformal prediction
+        let n = sorted.len() as f64;
+        let level = (1.0 - self.alpha) * (1.0 + 1.0 / n);
+        let idx = (level * n).ceil() as usize;
+        let idx = idx.min(sorted.len()) - 1;
+        Some(sorted[idx])
+    }
+
+    /// Evaluate a decision record against the conformal guard.
+    /// Returns the prediction set and whether the Bayesian action is admissible.
+    pub fn evaluate(&mut self, record: &DecisionRecord) -> ConformalPredictionSet {
+        let score = nonconformity_score(record);
+
+        let quantile = self.conformal_quantile();
+
+        // Add score to calibration window (rolling)
+        if self.scores.len() >= self.window_size {
+            self.scores.remove(0);
+        }
+        self.scores.push(score);
+
+        let threshold = match quantile {
+            Some(q) => q,
+            None => {
+                // Insufficient calibration data: accept all actions
+                self.total_count += 1;
+                self.in_set_count += 1;
+                return ConformalPredictionSet {
+                    quantile_threshold: f64::INFINITY,
+                    current_score: score,
+                    bayesian_action_in_set: true,
+                    admissible_actions: vec![
+                        DecisionAction::Allow,
+                        DecisionAction::Reject,
+                        DecisionAction::Repair,
+                    ],
+                    empirical_coverage: 1.0,
+                };
+            }
+        };
+
+        let bayesian_in_set = score <= threshold;
+
+        // Determine which actions would have scores <= threshold
+        // For now, if the Bayesian action is in set, it's the only admissible one.
+        // If not, we admit all actions (conformal guard widens the set).
+        let admissible = if bayesian_in_set {
+            vec![record.action]
+        } else {
+            vec![
+                DecisionAction::Allow,
+                DecisionAction::Reject,
+                DecisionAction::Repair,
+            ]
+        };
+
+        self.total_count += 1;
+        if bayesian_in_set {
+            self.in_set_count += 1;
+        }
+
+        let empirical_coverage = if self.total_count > 0 {
+            self.in_set_count as f64 / self.total_count as f64
+        } else {
+            1.0
+        };
+
+        ConformalPredictionSet {
+            quantile_threshold: threshold,
+            current_score: score,
+            bayesian_action_in_set: bayesian_in_set,
+            admissible_actions: admissible,
+            empirical_coverage,
+        }
+    }
+
+    /// Current empirical coverage rate.
+    #[must_use]
+    pub fn empirical_coverage(&self) -> f64 {
+        if self.total_count == 0 {
+            return 1.0;
+        }
+        self.in_set_count as f64 / self.total_count as f64
+    }
+
+    /// Number of scores in the calibration window.
+    #[must_use]
+    pub fn calibration_count(&self) -> usize {
+        self.scores.len()
+    }
+
+    /// Whether the calibration window has sufficient data.
+    #[must_use]
+    pub fn is_calibrated(&self) -> bool {
+        self.scores.len() >= 2
+    }
+
+    /// Whether coverage has dropped below target for the alert threshold.
+    #[must_use]
+    pub fn coverage_alert(&self) -> bool {
+        self.total_count >= 100 && self.empirical_coverage() < (1.0 - self.alpha)
+    }
+}
+
 #[cfg(feature = "asupersync")]
 #[must_use]
 pub fn outcome_to_action<T, E>(outcome: &asupersync::Outcome<T, E>) -> DecisionAction {
@@ -390,8 +562,8 @@ pub fn outcome_to_action<T, E>(outcome: &asupersync::Outcome<T, E>) -> DecisionA
 #[cfg(test)]
 mod tests {
     use super::{
-        DecisionAction, EvidenceLedger, RaptorQEnvelope, RuntimeMode, RuntimePolicy,
-        decision_to_card,
+        ConformalGuard, DecisionAction, EvidenceLedger, RaptorQEnvelope, RuntimeMode,
+        RuntimePolicy, decision_to_card,
     };
 
     #[test]
@@ -432,5 +604,132 @@ mod tests {
         let rendered = card.render_plain();
         assert!(rendered.contains("argmin_a"));
         assert!(rendered.contains("P(compatible|e)"));
+    }
+
+    // === Conformal Calibration Tests (bd-2t5e.9) ===
+
+    #[test]
+    fn conformal_guard_uncalibrated_accepts_all() {
+        let mut guard = ConformalGuard::new(100, 0.1);
+        assert!(!guard.is_calibrated());
+
+        let mut ledger = EvidenceLedger::new();
+        let policy = RuntimePolicy::strict();
+        policy.decide_unknown_feature("test", "detail", &mut ledger);
+
+        let ps = guard.evaluate(&ledger.records()[0]);
+        assert!(ps.bayesian_action_in_set);
+        assert_eq!(ps.admissible_actions.len(), 3); // all actions admissible
+        assert_eq!(ps.quantile_threshold, f64::INFINITY);
+    }
+
+    #[test]
+    fn conformal_guard_calibrates_after_sufficient_data() {
+        let mut guard = ConformalGuard::new(100, 0.1);
+        let mut ledger = EvidenceLedger::new();
+        let policy = RuntimePolicy::hardened(Some(100_000));
+
+        // Feed 10 decisions to build calibration window
+        for _ in 0..10 {
+            policy.decide_join_admission(50_000, &mut ledger);
+        }
+
+        for record in ledger.records() {
+            guard.evaluate(record);
+        }
+
+        assert!(guard.is_calibrated());
+        assert!(guard.conformal_quantile().is_some());
+        assert_eq!(guard.calibration_count(), 10);
+    }
+
+    #[test]
+    fn conformal_guard_rolling_window_evicts_old_scores() {
+        let mut guard = ConformalGuard::new(5, 0.1);
+        let mut ledger = EvidenceLedger::new();
+        let policy = RuntimePolicy::hardened(Some(100_000));
+
+        for _ in 0..10 {
+            policy.decide_join_admission(1000, &mut ledger);
+        }
+
+        for record in ledger.records() {
+            guard.evaluate(record);
+        }
+
+        // Window should be capped at 5
+        assert_eq!(guard.calibration_count(), 5);
+    }
+
+    #[test]
+    fn conformal_guard_coverage_tracking() {
+        let mut guard = ConformalGuard::new(50, 0.1);
+        let mut ledger = EvidenceLedger::new();
+        let policy = RuntimePolicy::hardened(Some(100_000));
+
+        // Generate consistent decisions
+        for _ in 0..20 {
+            policy.decide_join_admission(1000, &mut ledger);
+        }
+
+        for record in ledger.records() {
+            guard.evaluate(record);
+        }
+
+        // With consistent decisions, most should be in the conformal set
+        let coverage = guard.empirical_coverage();
+        assert!(
+            coverage > 0.5,
+            "coverage should be reasonable: {coverage}"
+        );
+    }
+
+    #[test]
+    fn conformal_guard_no_coverage_alert_under_100_decisions() {
+        let mut guard = ConformalGuard::new(100, 0.1);
+        let mut ledger = EvidenceLedger::new();
+        let policy = RuntimePolicy::hardened(Some(100_000));
+
+        for _ in 0..10 {
+            policy.decide_join_admission(1000, &mut ledger);
+        }
+        for record in ledger.records() {
+            guard.evaluate(record);
+        }
+
+        // Under 100 decisions, no alert regardless of coverage
+        assert!(!guard.coverage_alert());
+    }
+
+    #[test]
+    fn conformal_guard_quantile_is_deterministic() {
+        let mut guard = ConformalGuard::new(100, 0.1);
+        let mut ledger = EvidenceLedger::new();
+        let policy = RuntimePolicy::hardened(Some(100_000));
+
+        for _ in 0..5 {
+            policy.decide_join_admission(1000, &mut ledger);
+        }
+        for record in ledger.records() {
+            guard.evaluate(record);
+        }
+
+        let q1 = guard.conformal_quantile();
+        let q2 = guard.conformal_quantile();
+        assert_eq!(q1, q2);
+    }
+
+    #[test]
+    fn conformal_prediction_set_serializes() {
+        let mut guard = ConformalGuard::new(100, 0.1);
+        let mut ledger = EvidenceLedger::new();
+        let policy = RuntimePolicy::hardened(Some(100_000));
+        policy.decide_join_admission(1000, &mut ledger);
+
+        let ps = guard.evaluate(&ledger.records()[0]);
+        let json = serde_json::to_string(&ps).expect("serialize");
+        let _: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
+        assert!(json.contains("quantile_threshold"));
+        assert!(json.contains("empirical_coverage"));
     }
 }

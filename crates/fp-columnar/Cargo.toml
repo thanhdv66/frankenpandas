@@ -7,3 +7,6 @@ edition = "2024"
 fp-types = { path = "../fp-types" }
 serde = { workspace = true }
 thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

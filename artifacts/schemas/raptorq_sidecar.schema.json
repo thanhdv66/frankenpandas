@@ -1,0 +1,189 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "frankenpandas/raptorq_sidecar",
+  "title": "RaptorQ Sidecar Artifact",
+  "description": "RaptorQ forward-error-correction sidecar for durability. Maps to fp_conformance::RaptorQSidecarArtifact + fp_runtime::RaptorQEnvelope. FROZEN per bd-2gi.3.",
+  "type": "object",
+  "required": [
+    "artifact_id", "artifact_type", "source_hash",
+    "raptorq", "scrub", "decode_proofs",
+    "oti_serialized_hex", "source_packets", "repair_packets",
+    "repair_packets_per_block", "packet_records", "scrub_report"
+  ],
+  "properties": {
+    "artifact_id": {
+      "type": "string",
+      "description": "Unique identifier for the protected artifact (e.g., 'FP-P2C-001/parity_report')."
+    },
+    "artifact_type": {
+      "type": "string",
+      "description": "Category of artifact (e.g., 'conformance')."
+    },
+    "source_hash": {
+      "$ref": "shared_definitions.schema.json#/$defs/Sha256Hash",
+      "description": "SHA-256 hash of the original artifact content."
+    },
+    "raptorq": { "$ref": "#/$defs/RaptorQMetadata" },
+    "scrub": { "$ref": "#/$defs/ScrubStatus" },
+    "decode_proofs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/DecodeProof" },
+      "description": "History of decode recovery events."
+    },
+    "oti_serialized_hex": {
+      "type": "string",
+      "pattern": "^[0-9a-f]+$",
+      "description": "RaptorQ Object Transmission Information serialized as hex."
+    },
+    "source_packets": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Number of source encoding packets."
+    },
+    "repair_packets": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of repair encoding packets generated."
+    },
+    "repair_packets_per_block": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Repair packets generated per source block."
+    },
+    "packet_records": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/PacketRecord" },
+      "description": "All encoding packets (source + repair) with their hashes."
+    },
+    "scrub_report": { "$ref": "#/$defs/ScrubReport" }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "RaptorQMetadata": {
+      "type": "object",
+      "required": ["k", "repair_symbols", "overhead_ratio", "symbol_hashes"],
+      "properties": {
+        "k": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Number of source symbols (k parameter)."
+        },
+        "repair_symbols": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of repair symbols generated."
+        },
+        "overhead_ratio": {
+          "type": "number",
+          "minimum": 0.0,
+          "description": "Ratio of repair symbols to source symbols."
+        },
+        "symbol_hashes": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "description": "SHA-256 hashes of each encoding symbol (no 'sha256:' prefix)."
+        }
+      },
+      "additionalProperties": false
+    },
+    "ScrubStatus": {
+      "type": "object",
+      "required": ["last_ok_unix_ms", "status"],
+      "properties": {
+        "last_ok_unix_ms": {
+          "$ref": "shared_definitions.schema.json#/$defs/UnixTimestampMs",
+          "description": "Timestamp of last successful integrity scrub."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["ok", "failed"],
+          "description": "Current scrub status."
+        }
+      },
+      "additionalProperties": false
+    },
+    "DecodeProof": {
+      "type": "object",
+      "required": ["ts_unix_ms", "reason", "recovered_blocks", "proof_hash"],
+      "properties": {
+        "ts_unix_ms": {
+          "$ref": "shared_definitions.schema.json#/$defs/UnixTimestampMs"
+        },
+        "reason": {
+          "type": "string",
+          "description": "Human-readable description of why decode was triggered."
+        },
+        "recovered_blocks": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of source blocks successfully recovered."
+        },
+        "proof_hash": {
+          "$ref": "shared_definitions.schema.json#/$defs/Sha256Hash",
+          "description": "SHA-256 hash proving recovered content matches original."
+        }
+      },
+      "additionalProperties": false
+    },
+    "PacketRecord": {
+      "type": "object",
+      "required": ["source_block_number", "encoding_symbol_id", "is_source", "serialized_hex", "symbol_hash"],
+      "properties": {
+        "source_block_number": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Source block this packet belongs to."
+        },
+        "encoding_symbol_id": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Encoding symbol ID within the block."
+        },
+        "is_source": {
+          "type": "boolean",
+          "description": "True for source packets, false for repair packets."
+        },
+        "serialized_hex": {
+          "type": "string",
+          "pattern": "^[0-9a-f]+$",
+          "description": "Hex-encoded packet payload."
+        },
+        "symbol_hash": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "SHA-256 hash of this packet's payload (no prefix)."
+        }
+      },
+      "additionalProperties": false
+    },
+    "ScrubReport": {
+      "type": "object",
+      "required": ["verified_at_unix_ms", "status", "packet_count", "invalid_packets", "source_hash_verified"],
+      "properties": {
+        "verified_at_unix_ms": {
+          "$ref": "shared_definitions.schema.json#/$defs/UnixTimestampMs"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["ok", "failed"],
+          "description": "Scrub verification result."
+        },
+        "packet_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Total packets verified."
+        },
+        "invalid_packets": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Packets that failed hash verification."
+        },
+        "source_hash_verified": {
+          "type": "boolean",
+          "description": "Whether source artifact hash matches envelope."
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "frankenpandas/gate_result",
+  "title": "Packet Gate Result",
+  "description": "Result of evaluating a parity gate against a parity report. Maps to fp_conformance::PacketGateResult. FROZEN per bd-2gi.3.",
+  "type": "object",
+  "required": ["packet_id", "pass", "fixture_count", "strict_total", "strict_failed", "hardened_total", "hardened_failed", "reasons"],
+  "properties": {
+    "packet_id": {
+      "type": "string",
+      "pattern": "^FP-P2C-[0-9]{3}$"
+    },
+    "pass": {
+      "type": "boolean",
+      "description": "True if all gate checks passed."
+    },
+    "fixture_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Total fixtures evaluated."
+    },
+    "strict_total": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Total strict-mode cases."
+    },
+    "strict_failed": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Strict-mode failures."
+    },
+    "hardened_total": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Total hardened-mode cases."
+    },
+    "hardened_failed": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Hardened-mode failures."
+    },
+    "reasons": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Human-readable reasons for gate failure. Empty array on pass."
+    }
+  },
+  "additionalProperties": false
+}

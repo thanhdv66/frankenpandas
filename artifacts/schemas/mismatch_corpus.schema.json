@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "frankenpandas/mismatch_corpus",
+  "title": "Parity Mismatch Corpus",
+  "description": "Failed conformance cases collected per packet for debugging. FROZEN per bd-2gi.3.",
+  "type": "object",
+  "required": ["packet_id", "mismatch_count", "mismatches"],
+  "properties": {
+    "packet_id": {
+      "type": "string",
+      "pattern": "^FP-P2C-[0-9]{3}$"
+    },
+    "mismatch_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Count of mismatched cases."
+    },
+    "mismatches": {
+      "type": "array",
+      "items": { "$ref": "parity_report.schema.json#/$defs/CaseResult" },
+      "description": "Case results for all failing fixtures. Reuses CaseResult schema from parity_report."
+    }
+  },
+  "additionalProperties": false
+}

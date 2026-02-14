@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "frankenpandas/shared_definitions",
+  "title": "FrankenPandas Shared Type Definitions",
+  "description": "Canonical shared types used across all FrankenPandas artifact schemas. FROZEN per bd-2gi.3.",
+  "$defs": {
+    "Scalar": {
+      "type": "object",
+      "description": "Tagged union representing a typed scalar value. Maps to fp_types::Scalar.",
+      "required": ["kind", "value"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["null", "bool", "int64", "float64", "utf8"],
+          "description": "Discriminant tag matching fp_types::DType variants (lowercase)."
+        },
+        "value": {
+          "description": "String-encoded value. For null kind: one of 'null', 'nan', 'nat'. For bool: 'true' or 'false'. For int64: decimal integer string. For float64: IEEE 754 decimal string. For utf8: arbitrary string.",
+          "oneOf": [
+            { "type": "string" },
+            { "type": "null" }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "IndexLabel": {
+      "type": "object",
+      "description": "Tagged union representing an index label. Maps to fp_index::IndexLabel.",
+      "required": ["kind", "value"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["int64", "utf8"],
+          "description": "Discriminant tag. Only Int64 and Utf8 are valid index label types."
+        },
+        "value": {
+          "type": "string",
+          "description": "String-encoded label value."
+        }
+      },
+      "additionalProperties": false
+    },
+    "FixtureOperation": {
+      "type": "string",
+      "enum": [
+        "series_add",
+        "series_join",
+        "groupby_sum",
+        "index_align_union",
+        "index_has_duplicates",
+        "index_first_positions"
+      ],
+      "description": "Operation under test. Maps to fp_conformance::FixtureOperation (snake_case serialization)."
+    },
+    "RuntimeMode": {
+      "type": "string",
+      "enum": ["strict", "hardened"],
+      "description": "Runtime policy mode. Maps to fp_runtime::RuntimeMode (lowercase serialization)."
+    },
+    "CaseStatus": {
+      "type": "string",
+      "enum": ["pass", "fail"],
+      "description": "Fixture case execution result."
+    },
+    "OracleSource": {
+      "type": "string",
+      "enum": ["fixture", "live_legacy_pandas"],
+      "description": "Source of expected values. 'fixture' uses embedded expected fields; 'live_legacy_pandas' invokes pandas_oracle.py subprocess."
+    },
+    "Sha256Hash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "SHA-256 hash prefixed with 'sha256:' scheme identifier."
+    },
+    "UnixTimestampMs": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Unix epoch timestamp in milliseconds."
+    }
+  }
+}

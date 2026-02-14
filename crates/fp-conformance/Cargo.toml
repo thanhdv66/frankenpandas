@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+fp-columnar = { path = "../fp-columnar" }
 fp-frame = { path = "../fp-frame" }
 fp-groupby = { path = "../fp-groupby" }
 fp-index = { path = "../fp-index" }
@@ -16,3 +17,7 @@ serde_json = { workspace = true }
 serde_yaml = "0.9.34"
 sha2 = "0.10.9"
 thiserror = { workspace = true }
+
+[dev-dependencies]
+proptest = "1.10.0"
+tempfile = "3.14.0"

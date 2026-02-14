@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "frankenpandas/parity_report",
+  "title": "Packet Parity Report",
+  "description": "Conformance parity report for a packet suite run. Maps to fp_conformance::PacketParityReport. FROZEN per bd-2gi.3.",
+  "type": "object",
+  "required": ["suite", "oracle_present", "fixture_count", "passed", "failed", "results"],
+  "properties": {
+    "suite": {
+      "type": "string",
+      "description": "Suite identifier (e.g., 'phase2c_packets' or 'phase2c_packets:FP-P2C-001')."
+    },
+    "packet_id": {
+      "oneOf": [
+        { "type": "string", "pattern": "^FP-P2C-[0-9]{3}$" },
+        { "type": "null" }
+      ],
+      "description": "Packet filter. Null for aggregate reports."
+    },
+    "oracle_present": {
+      "type": "boolean",
+      "description": "Whether the legacy pandas oracle was available during execution."
+    },
+    "fixture_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Total fixture count executed."
+    },
+    "passed": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Count of passing cases."
+    },
+    "failed": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Count of failing cases."
+    },
+    "results": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/CaseResult" },
+      "description": "Per-case execution results."
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "CaseResult": {
+      "type": "object",
+      "required": ["packet_id", "case_id", "mode", "operation", "status", "evidence_records"],
+      "properties": {
+        "packet_id": {
+          "type": "string",
+          "pattern": "^FP-P2C-[0-9]{3}$"
+        },
+        "case_id": { "type": "string" },
+        "mode": { "$ref": "shared_definitions.schema.json#/$defs/RuntimeMode" },
+        "operation": { "$ref": "shared_definitions.schema.json#/$defs/FixtureOperation" },
+        "status": { "$ref": "shared_definitions.schema.json#/$defs/CaseStatus" },
+        "mismatch": {
+          "oneOf": [
+            { "type": "string" },
+            { "type": "null" }
+          ],
+          "description": "Mismatch description if status is fail. Null on pass."
+        },
+        "evidence_records": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of evidence ledger records emitted during this case."
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "frankenpandas/fixture_manifest",
+  "title": "Fixture Manifest",
+  "description": "Inventory of all test fixtures for a given packet. FROZEN per bd-2gi.3.",
+  "type": "object",
+  "required": ["packet_id", "fixtures"],
+  "properties": {
+    "packet_id": {
+      "type": "string",
+      "pattern": "^FP-P2C-[0-9]{3}$"
+    },
+    "fixtures": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "path", "class"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Fixture case identifier, matching the case_id in the fixture file."
+          },
+          "path": {
+            "type": "string",
+            "description": "Relative path from repo root to the fixture JSON file."
+          },
+          "class": {
+            "type": "string",
+            "description": "Fixture classification (e.g., 'happy_path', 'adversarial_duplicate_labels', 'edge_case')."
+          }
+        },
+        "additionalProperties": false
+      },
+      "description": "Ordered list of fixture entries."
+    }
+  },
+  "additionalProperties": false
+}

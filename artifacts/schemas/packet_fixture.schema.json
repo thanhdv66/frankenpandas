@@ -1,0 +1,183 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "frankenpandas/packet_fixture",
+  "title": "Packet Fixture",
+  "description": "Test fixture for a single conformance case. Maps to fp_conformance::PacketFixture. FROZEN per bd-2gi.3.",
+  "type": "object",
+  "required": ["packet_id", "case_id", "mode", "operation"],
+  "properties": {
+    "packet_id": {
+      "type": "string",
+      "pattern": "^FP-P2C-[0-9]{3}$",
+      "description": "Packet identifier (e.g., FP-P2C-001)."
+    },
+    "case_id": {
+      "type": "string",
+      "description": "Unique case identifier within the packet (e.g., series_add_alignment_union_strict)."
+    },
+    "mode": { "$ref": "shared_definitions.schema.json#/$defs/RuntimeMode" },
+    "operation": { "$ref": "shared_definitions.schema.json#/$defs/FixtureOperation" },
+    "oracle_source": {
+      "oneOf": [
+        { "$ref": "shared_definitions.schema.json#/$defs/OracleSource" },
+        { "type": "null" }
+      ],
+      "description": "Source of expected values. Null defaults to fixture mode."
+    },
+    "left": {
+      "oneOf": [
+        { "$ref": "#/$defs/FixtureSeries" },
+        { "type": "null" }
+      ],
+      "description": "Left input series. Required for series_add, series_join, groupby_sum."
+    },
+    "right": {
+      "oneOf": [
+        { "$ref": "#/$defs/FixtureSeries" },
+        { "type": "null" }
+      ],
+      "description": "Right input series. Required for series_add, series_join."
+    },
+    "index": {
+      "oneOf": [
+        {
+          "type": "array",
+          "items": { "$ref": "shared_definitions.schema.json#/$defs/IndexLabel" }
+        },
+        { "type": "null" }
+      ],
+      "description": "Input index for index-only operations (index_align_union, index_has_duplicates, index_first_positions)."
+    },
+    "join_type": {
+      "oneOf": [
+        { "type": "string", "enum": ["inner", "left"] },
+        { "type": "null" }
+      ],
+      "description": "Join type for series_join operation."
+    },
+    "expected_series": {
+      "oneOf": [
+        { "$ref": "#/$defs/FixtureExpectedSeries" },
+        { "type": "null" }
+      ],
+      "description": "Expected output for series_add and groupby_sum."
+    },
+    "expected_join": {
+      "oneOf": [
+        { "$ref": "#/$defs/FixtureExpectedJoin" },
+        { "type": "null" }
+      ],
+      "description": "Expected output for series_join."
+    },
+    "expected_alignment": {
+      "oneOf": [
+        { "$ref": "#/$defs/FixtureExpectedAlignment" },
+        { "type": "null" }
+      ],
+      "description": "Expected output for index_align_union."
+    },
+    "expected_bool": {
+      "oneOf": [
+        { "type": "boolean" },
+        { "type": "null" }
+      ],
+      "description": "Expected output for index_has_duplicates."
+    },
+    "expected_positions": {
+      "oneOf": [
+        {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 0 }
+        },
+        { "type": "null" }
+      ],
+      "description": "Expected output for index_first_positions (position map values)."
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "FixtureSeries": {
+      "type": "object",
+      "required": ["name", "index", "values"],
+      "properties": {
+        "name": { "type": "string", "description": "Series name." },
+        "index": {
+          "type": "array",
+          "items": { "$ref": "shared_definitions.schema.json#/$defs/IndexLabel" },
+          "description": "Index labels."
+        },
+        "values": {
+          "type": "array",
+          "items": { "$ref": "shared_definitions.schema.json#/$defs/Scalar" },
+          "description": "Column values. Length must equal index length."
+        }
+      },
+      "additionalProperties": false
+    },
+    "FixtureExpectedSeries": {
+      "type": "object",
+      "required": ["index", "values"],
+      "properties": {
+        "index": {
+          "type": "array",
+          "items": { "$ref": "shared_definitions.schema.json#/$defs/IndexLabel" }
+        },
+        "values": {
+          "type": "array",
+          "items": { "$ref": "shared_definitions.schema.json#/$defs/Scalar" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "FixtureExpectedJoin": {
+      "type": "object",
+      "required": ["index", "left_values", "right_values"],
+      "properties": {
+        "index": {
+          "type": "array",
+          "items": { "$ref": "shared_definitions.schema.json#/$defs/IndexLabel" }
+        },
+        "left_values": {
+          "type": "array",
+          "items": { "$ref": "shared_definitions.schema.json#/$defs/Scalar" }
+        },
+        "right_values": {
+          "type": "array",
+          "items": { "$ref": "shared_definitions.schema.json#/$defs/Scalar" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "FixtureExpectedAlignment": {
+      "type": "object",
+      "required": ["union_index", "left_positions", "right_positions"],
+      "properties": {
+        "union_index": {
+          "type": "array",
+          "items": { "$ref": "shared_definitions.schema.json#/$defs/IndexLabel" }
+        },
+        "left_positions": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              { "type": "integer", "minimum": 0 },
+              { "type": "null" }
+            ]
+          },
+          "description": "Position mapping from union index to left index. Null = not present in left."
+        },
+        "right_positions": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              { "type": "integer", "minimum": 0 },
+              { "type": "null" }
+            ]
+          },
+          "description": "Position mapping from union index to right index. Null = not present in right."
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

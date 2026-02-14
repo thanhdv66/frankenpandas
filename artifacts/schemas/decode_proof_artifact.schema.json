@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "frankenpandas/decode_proof_artifact",
+  "title": "Decode Proof Artifact",
+  "description": "Standalone decode recovery proof file emitted per packet. FROZEN per bd-2gi.3.",
+  "type": "object",
+  "required": ["packet_id", "decode_proofs", "status"],
+  "properties": {
+    "packet_id": {
+      "type": "string",
+      "pattern": "^FP-P2C-[0-9]{3}$"
+    },
+    "decode_proofs": {
+      "type": "array",
+      "items": { "$ref": "raptorq_sidecar.schema.json#/$defs/DecodeProof" },
+      "description": "All decode recovery proofs for this packet."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["recovered", "failed", "not_attempted"],
+      "description": "Overall decode drill outcome."
+    }
+  },
+  "additionalProperties": false
+}

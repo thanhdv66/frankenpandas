@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "test_log_entry.schema.json",
+  "title": "FrankenPandas Structured Test Log Entry",
+  "description": "Schema for structured test log output (eprintln! format). Frozen per bd-2gi.5.",
+  "type": "object",
+  "required": ["test_name", "result"],
+  "properties": {
+    "test_name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "description": "Test function name in snake_case"
+    },
+    "result": {
+      "type": "string",
+      "enum": ["PASS", "FAIL"],
+      "description": "Test outcome"
+    },
+    "rows": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Row count in test data"
+    },
+    "cols": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Column count in test data"
+    },
+    "parse_ok": {
+      "type": "boolean",
+      "description": "Whether parsing succeeded"
+    },
+    "dtype_per_col": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["null", "bool", "int64", "float64", "utf8"]
+      },
+      "description": "Inferred dtype per column"
+    },
+    "golden_match": {
+      "type": "boolean",
+      "description": "Whether output matched golden reference"
+    },
+    "elapsed_ms": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Wall-clock time in milliseconds"
+    },
+    "seed": {
+      "type": "string",
+      "description": "Proptest seed for reproducibility"
+    },
+    "fixture_id": {
+      "type": "string",
+      "description": "Conformance fixture identifier (packet_id::case_id)"
+    },
+    "mode": {
+      "$ref": "shared_definitions.schema.json#/$defs/RuntimeMode",
+      "description": "Runtime mode (strict or hardened)"
+    },
+    "artifact_refs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["kind", "path"],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "description": "Artifact type (parity_report, raptorq_sidecar, etc.)"
+          },
+          "path": {
+            "type": "string",
+            "description": "Path relative to repo root"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "description": "SHA-256 hash of artifact content"
+          }
+        }
+      },
+      "description": "Referenced evidence artifacts"
+    },
+    "env": {
+      "type": "object",
+      "properties": {
+        "rust_version": { "type": "string" },
+        "os": { "type": "string" },
+        "cargo_profile": { "type": "string", "enum": ["debug", "release"] }
+      },
+      "description": "Environment metadata"
+    }
+  }
+}

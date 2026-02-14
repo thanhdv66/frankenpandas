@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "frankenpandas/parity_gate",
+  "title": "Parity Gate Configuration",
+  "description": "Per-packet gate thresholds for conformance enforcement. Serialized as YAML. FROZEN per bd-2gi.3.",
+  "type": "object",
+  "required": ["packet_id", "strict", "hardened", "machine_check"],
+  "properties": {
+    "packet_id": {
+      "type": "string",
+      "pattern": "^FP-P2C-[0-9]{3}$",
+      "description": "Packet identifier this gate applies to."
+    },
+    "strict": {
+      "type": "object",
+      "required": ["critical_drift_budget", "non_critical_drift_budget_percent"],
+      "properties": {
+        "critical_drift_budget": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum number of strict-mode failures allowed before gate fails."
+        },
+        "non_critical_drift_budget_percent": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "description": "Maximum failure percentage in strict mode (0.0 to 1.0)."
+        }
+      },
+      "additionalProperties": false
+    },
+    "hardened": {
+      "type": "object",
+      "required": ["divergence_budget_percent", "allowlisted_divergence_categories"],
+      "properties": {
+        "divergence_budget_percent": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "description": "Maximum divergence percentage for hardened mode (0.0 to 1.0)."
+        },
+        "allowlisted_divergence_categories": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Categories of divergence that are approved and do not count against budget."
+        }
+      },
+      "additionalProperties": false
+    },
+    "machine_check": {
+      "type": "object",
+      "required": ["suite", "require_fixture_count_at_least", "require_failed"],
+      "properties": {
+        "suite": {
+          "type": "string",
+          "description": "Suite identifier the gate evaluates against (e.g., 'phase2c_packets')."
+        },
+        "require_fixture_count_at_least": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Minimum number of fixtures that must execute for gate to be evaluable."
+        },
+        "require_failed": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Required number of failures (typically 0 for green gate)."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
