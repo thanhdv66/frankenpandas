@@ -135,8 +135,8 @@ impl MaterializedView {
             let delta_result = evaluate_delta(&self.expr, &delta_ctx, delta, policy, ledger)?;
 
             // Concatenate: old result + delta result
-            let combined = fp_frame::concat_series(&[&self.result, &delta_result])
-                .map_err(ExprError::from)?;
+            let combined =
+                fp_frame::concat_series(&[&self.result, &delta_result]).map_err(ExprError::from)?;
             self.result = combined;
             self.base_snapshot = context.clone();
         } else {
@@ -172,12 +172,8 @@ fn evaluate_delta(
         Expr::Series { name } => {
             if name.0 == delta.series_name {
                 // This is the series that has the delta
-                Series::from_values(
-                    &name.0,
-                    delta.new_labels.clone(),
-                    delta.new_values.clone(),
-                )
-                .map_err(ExprError::from)
+                Series::from_values(&name.0, delta.new_labels.clone(), delta.new_values.clone())
+                    .map_err(ExprError::from)
             } else {
                 // Other series: extract the corresponding labels from the full series
                 let full = delta_ctx
@@ -185,7 +181,8 @@ fn evaluate_delta(
                     .ok_or_else(|| ExprError::UnknownSeries(name.0.clone()))?;
                 // For non-delta series in an add, we need the values at the delta labels.
                 // If the other series doesn't have those labels, alignment will fill nulls.
-                let reindexed = full.reindex(delta.new_labels.clone())
+                let reindexed = full
+                    .reindex(delta.new_labels.clone())
                     .map_err(ExprError::from)?;
                 Ok(reindexed)
             }
@@ -272,8 +269,8 @@ mod tests {
         let mut ledger = EvidenceLedger::new();
         let policy = RuntimePolicy::hardened(Some(10_000));
 
-        let view = MaterializedView::from_full_eval(&expr, &ctx, &policy, &mut ledger)
-            .expect("full eval");
+        let view =
+            MaterializedView::from_full_eval(&expr, &ctx, &policy, &mut ledger).expect("full eval");
         assert_eq!(view.result.values().len(), 2);
     }
 
@@ -289,8 +286,8 @@ mod tests {
         let mut ledger = EvidenceLedger::new();
         let policy = RuntimePolicy::hardened(Some(10_000));
 
-        let mut view = MaterializedView::from_full_eval(&expr, &ctx, &policy, &mut ledger)
-            .expect("full eval");
+        let mut view =
+            MaterializedView::from_full_eval(&expr, &ctx, &policy, &mut ledger).expect("full eval");
         assert_eq!(view.result.values().len(), 2);
 
         // Append 2 new rows
@@ -339,8 +336,8 @@ mod tests {
         let mut ledger = EvidenceLedger::new();
         let policy = RuntimePolicy::hardened(Some(10_000));
 
-        let mut view = MaterializedView::from_full_eval(&expr, &ctx, &policy, &mut ledger)
-            .expect("full eval");
+        let mut view =
+            MaterializedView::from_full_eval(&expr, &ctx, &policy, &mut ledger).expect("full eval");
         assert_eq!(view.result.values().len(), 2);
         assert_eq!(view.result.values()[0], Scalar::Int64(11));
         assert_eq!(view.result.values()[1], Scalar::Int64(22));
@@ -387,7 +384,11 @@ mod tests {
     fn ivm_isomorphism_incremental_matches_full() {
         // The key correctness property: incremental result must equal full re-eval.
         let a = make_series("a", vec![0, 1], vec![Scalar::Int64(5), Scalar::Int64(10)]);
-        let b = make_series("b", vec![0, 1], vec![Scalar::Int64(100), Scalar::Int64(200)]);
+        let b = make_series(
+            "b",
+            vec![0, 1],
+            vec![Scalar::Int64(100), Scalar::Int64(200)],
+        );
         let mut ctx = EvalContext::new();
         ctx.insert_series(a);
         ctx.insert_series(b);
@@ -403,8 +404,8 @@ mod tests {
         let mut ledger = EvidenceLedger::new();
         let policy = RuntimePolicy::hardened(Some(10_000));
 
-        let mut view = MaterializedView::from_full_eval(&expr, &ctx, &policy, &mut ledger)
-            .expect("base");
+        let mut view =
+            MaterializedView::from_full_eval(&expr, &ctx, &policy, &mut ledger).expect("base");
 
         // Apply delta
         let delta = Delta {
@@ -459,8 +460,8 @@ mod tests {
         let mut ledger = EvidenceLedger::new();
         let policy = RuntimePolicy::hardened(Some(10_000));
 
-        let mut view = MaterializedView::from_full_eval(&expr, &ctx, &policy, &mut ledger)
-            .expect("base");
+        let mut view =
+            MaterializedView::from_full_eval(&expr, &ctx, &policy, &mut ledger).expect("base");
 
         // First delta
         let delta1 = Delta {

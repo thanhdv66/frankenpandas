@@ -88,7 +88,11 @@ impl Scalar {
 
     #[must_use]
     pub fn coalesce(&self, other: &Self) -> Self {
-        if self.is_missing() { other.clone() } else { self.clone() }
+        if self.is_missing() {
+            other.clone()
+        } else {
+            self.clone()
+        }
     }
 
     pub fn to_f64(&self) -> Result<f64, TypeError> {
@@ -223,16 +227,18 @@ pub fn count_na(values: &[Scalar]) -> usize {
 pub fn fill_na(values: &[Scalar], fill: &Scalar) -> Vec<Scalar> {
     values
         .iter()
-        .map(|v| if v.is_missing() { fill.clone() } else { v.clone() })
+        .map(|v| {
+            if v.is_missing() {
+                fill.clone()
+            } else {
+                v.clone()
+            }
+        })
         .collect()
 }
 
 pub fn dropna(values: &[Scalar]) -> Vec<Scalar> {
-    values
-        .iter()
-        .filter(|v| !v.is_missing())
-        .cloned()
-        .collect()
+    values.iter().filter(|v| !v.is_missing()).cloned().collect()
 }
 
 // ── Nanops: null-skipping numeric reductions ───────────────────────────

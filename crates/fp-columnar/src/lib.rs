@@ -1,6 +1,8 @@
 #![forbid(unsafe_code)]
 
-use fp_types::{DType, NullKind, Scalar, TypeError, cast_scalar_owned, common_dtype, infer_dtype};
+use fp_types::{
+    DType, NullKind, Scalar, TypeError, cast_scalar, cast_scalar_owned, common_dtype, infer_dtype,
+};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -314,6 +316,49 @@ impl ColumnData {
     }
 }
 
+/// Compare two non-missing scalars using the given comparison operator.
+///
+/// Both scalars are converted to `f64` for comparison. For `Utf8` values,
+/// lexicographic ordering is used. Returns `Err` for incompatible types.
+fn scalar_compare(left: &Scalar, right: &Scalar, op: ComparisonOp) -> Result<bool, ColumnError> {
+    // Handle Utf8 comparisons separately (lexicographic).
+    if let (Scalar::Utf8(a), Scalar::Utf8(b)) = (left, right) {
+        return Ok(match op {
+            ComparisonOp::Gt => a > b,
+            ComparisonOp::Lt => a < b,
+            ComparisonOp::Eq => a == b,
+            ComparisonOp::Ne => a != b,
+            ComparisonOp::Ge => a >= b,
+            ComparisonOp::Le => a <= b,
+        });
+    }
+
+    // Handle Bool comparisons (false < true).
+    if let (Scalar::Bool(a), Scalar::Bool(b)) = (left, right) {
+        return Ok(match op {
+            ComparisonOp::Gt => *a && !*b,
+            ComparisonOp::Lt => !*a && *b,
+            ComparisonOp::Eq => a == b,
+            ComparisonOp::Ne => a != b,
+            ComparisonOp::Ge => *a >= *b,
+            ComparisonOp::Le => *a <= *b,
+        });
+    }
+
+    // Numeric: convert both to f64.
+    let lhs = left.to_f64()?;
+    let rhs = right.to_f64()?;
+
+    Ok(match op {
+        ComparisonOp::Gt => lhs > rhs,
+        ComparisonOp::Lt => lhs < rhs,
+        ComparisonOp::Eq => lhs == rhs,
+        ComparisonOp::Ne => lhs != rhs,
+        ComparisonOp::Ge => lhs >= rhs,
+        ComparisonOp::Le => lhs <= rhs,
+    })
+}
+
 /// AG-10: Vectorized binary arithmetic on `&[f64]` slices.
 ///
 /// Both inputs must have the same length. The combined validity mask
@@ -407,6 +452,21 @@ pub enum ArithmeticOp {
     Sub,
     Mul,
     Div,
+}
+
+/// Element-wise comparison operations that produce `Bool`-typed columns.
+///
+/// Null propagation: any missing/NaN input produces a missing output.
+/// This matches pandas nullable-integer semantics (`pd.NA` propagation).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ComparisonOp {
+    Gt,
+    Lt,
+    Eq,
+    Ne,
+    Ge,
+    Le,
 }
 
 #[derive(Debug, Error, Clone, PartialEq)]
@@ -662,6 +722,117 @@ impl Column {
             .collect::<Result<Vec<_>, _>>()?;
 
         Self::new(out_dtype, values)
+    }
+
+    /// Element-wise comparison producing a `Bool`-typed column.
+    ///
+    /// Both columns must have the same length. Missing values (Null or NaN)
+    /// propagate: if either operand is missing, the result is missing.
+    pub fn binary_comparison(&self, right: &Self, op: ComparisonOp) -> Result<Self, ColumnError> {
+        if self.len() != right.len() {
+            return Err(ColumnError::LengthMismatch {
+                left: self.len(),
+                right: right.len(),
+            });
+        }
+
+        let values = self
+            .values
+            .iter()
+            .zip(&right.values)
+            .map(|(l, r)| -> Result<Scalar, ColumnError> {
+                if l.is_missing() || r.is_missing() {
+                    return Ok(Scalar::Null(NullKind::Null));
+                }
+                let result = scalar_compare(l, r, op)?;
+                Ok(Scalar::Bool(result))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Self::new(DType::Bool, values)
+    }
+
+    /// Compare every element against a scalar value, producing a `Bool`-typed column.
+    ///
+    /// Missing values in the column propagate as missing in the result.
+    pub fn compare_scalar(&self, scalar: &Scalar, op: ComparisonOp) -> Result<Self, ColumnError> {
+        if scalar.is_missing() {
+            // Comparing against missing always produces all-missing.
+            let values = vec![Scalar::Null(NullKind::Null); self.len()];
+            return Self::new(DType::Bool, values);
+        }
+
+        let values = self
+            .values
+            .iter()
+            .map(|v| -> Result<Scalar, ColumnError> {
+                if v.is_missing() {
+                    return Ok(Scalar::Null(NullKind::Null));
+                }
+                let result = scalar_compare(v, scalar, op)?;
+                Ok(Scalar::Bool(result))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Self::new(DType::Bool, values)
+    }
+
+    /// Select elements where `mask` is `true`, producing a new column.
+    ///
+    /// The mask must be a `Bool`-typed column of the same length.
+    /// Missing values in the mask are treated as `false` (not selected).
+    pub fn filter_by_mask(&self, mask: &Self) -> Result<Self, ColumnError> {
+        if self.len() != mask.len() {
+            return Err(ColumnError::LengthMismatch {
+                left: self.len(),
+                right: mask.len(),
+            });
+        }
+
+        let values = self
+            .values
+            .iter()
+            .zip(mask.values.iter())
+            .filter_map(|(val, mask_val)| match mask_val {
+                Scalar::Bool(true) => Some(val.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        Self::new(self.dtype, values)
+    }
+
+    /// Fill missing values with a replacement scalar.
+    ///
+    /// Returns a new column where every missing position is replaced
+    /// by `fill_value`. The fill value is cast to the column's dtype.
+    pub fn fillna(&self, fill_value: &Scalar) -> Result<Self, ColumnError> {
+        let cast_fill = cast_scalar(fill_value, self.dtype)?;
+        let values = self
+            .values
+            .iter()
+            .map(|v| {
+                if v.is_missing() {
+                    cast_fill.clone()
+                } else {
+                    v.clone()
+                }
+            })
+            .collect();
+
+        Self::new(self.dtype, values)
+    }
+
+    /// Remove missing values, returning a shorter column.
+    pub fn dropna(&self) -> Result<Self, ColumnError> {
+        let values = self
+            .values
+            .iter()
+            .filter(|v| !v.is_missing())
+            .cloned()
+            .collect();
+
+        Self::new(self.dtype, values)
     }
 
     #[must_use]
@@ -1500,6 +1671,256 @@ mod tests {
 
                 assert_eq!(cracked, naive, "large column mismatch for pivot={pivot}");
             }
+        }
+    }
+
+    // === Comparison, Filter, and Missing-Data Operation Tests ===
+
+    mod comparison_tests {
+        use super::super::*;
+        use fp_types::{NullKind, Scalar};
+
+        #[test]
+        fn comparison_gt_int64() {
+            let left =
+                Column::from_values(vec![Scalar::Int64(1), Scalar::Int64(5), Scalar::Int64(3)])
+                    .expect("left");
+            let right =
+                Column::from_values(vec![Scalar::Int64(3), Scalar::Int64(3), Scalar::Int64(3)])
+                    .expect("right");
+
+            let result = left
+                .binary_comparison(&right, ComparisonOp::Gt)
+                .expect("gt");
+            assert_eq!(result.dtype(), fp_types::DType::Bool);
+            assert_eq!(result.values()[0], Scalar::Bool(false));
+            assert_eq!(result.values()[1], Scalar::Bool(true));
+            assert_eq!(result.values()[2], Scalar::Bool(false));
+        }
+
+        #[test]
+        fn comparison_all_ops_numeric() {
+            let left = Column::from_values(vec![Scalar::Float64(5.0)]).expect("left");
+            let right = Column::from_values(vec![Scalar::Float64(3.0)]).expect("right");
+
+            let gt = left
+                .binary_comparison(&right, ComparisonOp::Gt)
+                .expect("gt");
+            let lt = left
+                .binary_comparison(&right, ComparisonOp::Lt)
+                .expect("lt");
+            let eq = left
+                .binary_comparison(&right, ComparisonOp::Eq)
+                .expect("eq");
+            let ne = left
+                .binary_comparison(&right, ComparisonOp::Ne)
+                .expect("ne");
+            let ge = left
+                .binary_comparison(&right, ComparisonOp::Ge)
+                .expect("ge");
+            let le = left
+                .binary_comparison(&right, ComparisonOp::Le)
+                .expect("le");
+
+            assert_eq!(gt.values()[0], Scalar::Bool(true));
+            assert_eq!(lt.values()[0], Scalar::Bool(false));
+            assert_eq!(eq.values()[0], Scalar::Bool(false));
+            assert_eq!(ne.values()[0], Scalar::Bool(true));
+            assert_eq!(ge.values()[0], Scalar::Bool(true));
+            assert_eq!(le.values()[0], Scalar::Bool(false));
+        }
+
+        #[test]
+        fn comparison_equality_equal_values() {
+            let col = Column::from_values(vec![Scalar::Int64(42)]).expect("col");
+            let result = col.binary_comparison(&col, ComparisonOp::Eq).expect("eq");
+            assert_eq!(result.values()[0], Scalar::Bool(true));
+
+            let ne = col.binary_comparison(&col, ComparisonOp::Ne).expect("ne");
+            assert_eq!(ne.values()[0], Scalar::Bool(false));
+        }
+
+        #[test]
+        fn comparison_null_propagation() {
+            let left = Column::from_values(vec![
+                Scalar::Int64(1),
+                Scalar::Null(NullKind::Null),
+                Scalar::Int64(3),
+            ])
+            .expect("left");
+            let right = Column::from_values(vec![
+                Scalar::Int64(2),
+                Scalar::Int64(2),
+                Scalar::Null(NullKind::Null),
+            ])
+            .expect("right");
+
+            let result = left
+                .binary_comparison(&right, ComparisonOp::Gt)
+                .expect("gt");
+            assert_eq!(result.values()[0], Scalar::Bool(false));
+            assert!(result.values()[1].is_missing(), "null op valid = null");
+            assert!(result.values()[2].is_missing(), "valid op null = null");
+        }
+
+        #[test]
+        fn comparison_utf8_lexicographic() {
+            let left = Column::from_values(vec![
+                Scalar::Utf8("banana".to_string()),
+                Scalar::Utf8("apple".to_string()),
+            ])
+            .expect("left");
+            let right = Column::from_values(vec![
+                Scalar::Utf8("apple".to_string()),
+                Scalar::Utf8("cherry".to_string()),
+            ])
+            .expect("right");
+
+            let gt = left
+                .binary_comparison(&right, ComparisonOp::Gt)
+                .expect("gt");
+            assert_eq!(gt.values()[0], Scalar::Bool(true));
+            assert_eq!(gt.values()[1], Scalar::Bool(false));
+        }
+
+        #[test]
+        fn compare_scalar_gt() {
+            let col = Column::from_values(vec![
+                Scalar::Int64(1),
+                Scalar::Int64(5),
+                Scalar::Null(NullKind::Null),
+                Scalar::Int64(3),
+            ])
+            .expect("col");
+
+            let result = col
+                .compare_scalar(&Scalar::Int64(3), ComparisonOp::Gt)
+                .expect("gt");
+            assert_eq!(result.values()[0], Scalar::Bool(false));
+            assert_eq!(result.values()[1], Scalar::Bool(true));
+            assert!(result.values()[2].is_missing());
+            assert_eq!(result.values()[3], Scalar::Bool(false));
+        }
+
+        #[test]
+        fn compare_scalar_with_missing_scalar() {
+            let col = Column::from_values(vec![Scalar::Int64(1), Scalar::Int64(2)]).expect("col");
+
+            let result = col
+                .compare_scalar(&Scalar::Null(NullKind::Null), ComparisonOp::Eq)
+                .expect("eq");
+            assert!(result.values()[0].is_missing());
+            assert!(result.values()[1].is_missing());
+        }
+
+        #[test]
+        fn filter_by_mask_basic() {
+            let col = Column::from_values(vec![
+                Scalar::Int64(10),
+                Scalar::Int64(20),
+                Scalar::Int64(30),
+                Scalar::Int64(40),
+            ])
+            .expect("col");
+            let mask = Column::from_values(vec![
+                Scalar::Bool(true),
+                Scalar::Bool(false),
+                Scalar::Bool(true),
+                Scalar::Bool(false),
+            ])
+            .expect("mask");
+
+            let result = col.filter_by_mask(&mask).expect("filter");
+            assert_eq!(result.len(), 2);
+            assert_eq!(result.values()[0], Scalar::Int64(10));
+            assert_eq!(result.values()[1], Scalar::Int64(30));
+        }
+
+        #[test]
+        fn filter_by_mask_null_treated_as_false() {
+            let col = Column::from_values(vec![Scalar::Int64(1), Scalar::Int64(2)]).expect("col");
+            let mask = Column::from_values(vec![Scalar::Bool(true), Scalar::Null(NullKind::Null)])
+                .expect("mask");
+
+            let result = col.filter_by_mask(&mask).expect("filter");
+            assert_eq!(result.len(), 1);
+            assert_eq!(result.values()[0], Scalar::Int64(1));
+        }
+
+        #[test]
+        fn filter_by_mask_empty_result() {
+            let col = Column::from_values(vec![Scalar::Int64(1), Scalar::Int64(2)]).expect("col");
+            let mask =
+                Column::from_values(vec![Scalar::Bool(false), Scalar::Bool(false)]).expect("mask");
+
+            let result = col.filter_by_mask(&mask).expect("filter");
+            assert!(result.is_empty());
+        }
+
+        #[test]
+        fn fillna_replaces_missing() {
+            let col = Column::from_values(vec![
+                Scalar::Int64(1),
+                Scalar::Null(NullKind::Null),
+                Scalar::Int64(3),
+                Scalar::Null(NullKind::Null),
+            ])
+            .expect("col");
+
+            let result = col.fillna(&Scalar::Int64(0)).expect("fillna");
+            assert_eq!(result.values()[0], Scalar::Int64(1));
+            assert_eq!(result.values()[1], Scalar::Int64(0));
+            assert_eq!(result.values()[2], Scalar::Int64(3));
+            assert_eq!(result.values()[3], Scalar::Int64(0));
+            assert_eq!(result.validity().count_valid(), 4);
+        }
+
+        #[test]
+        fn dropna_removes_missing() {
+            let col = Column::from_values(vec![
+                Scalar::Int64(1),
+                Scalar::Null(NullKind::Null),
+                Scalar::Int64(3),
+                Scalar::Null(NullKind::NaN),
+            ])
+            .expect("col");
+
+            let result = col.dropna().expect("dropna");
+            assert_eq!(result.len(), 2);
+            assert_eq!(result.values()[0], Scalar::Int64(1));
+            assert_eq!(result.values()[1], Scalar::Int64(3));
+        }
+
+        #[test]
+        fn comparison_empty_columns() {
+            let left = Column::from_values(vec![]).expect("left");
+            let right = Column::from_values(vec![]).expect("right");
+            let result = left
+                .binary_comparison(&right, ComparisonOp::Eq)
+                .expect("eq");
+            assert!(result.is_empty());
+        }
+
+        #[test]
+        fn comparison_length_mismatch_error() {
+            let left = Column::from_values(vec![Scalar::Int64(1)]).expect("left");
+            let right =
+                Column::from_values(vec![Scalar::Int64(1), Scalar::Int64(2)]).expect("right");
+            assert!(left.binary_comparison(&right, ComparisonOp::Eq).is_err());
+        }
+
+        #[test]
+        fn comparison_bool_ordering() {
+            let left =
+                Column::from_values(vec![Scalar::Bool(true), Scalar::Bool(false)]).expect("left");
+            let right =
+                Column::from_values(vec![Scalar::Bool(false), Scalar::Bool(true)]).expect("right");
+
+            let gt = left
+                .binary_comparison(&right, ComparisonOp::Gt)
+                .expect("gt");
+            assert_eq!(gt.values()[0], Scalar::Bool(true));
+            assert_eq!(gt.values()[1], Scalar::Bool(false));
         }
     }
 }

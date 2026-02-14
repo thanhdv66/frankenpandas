@@ -7,15 +7,16 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use fp_frame::{FrameError, Series};
-use fp_groupby::{GroupByOptions, groupby_sum};
+use fp_frame::{FrameError, Series, concat_series};
+use fp_groupby::{GroupByOptions, groupby_count, groupby_mean, groupby_sum};
 use fp_index::{AlignmentPlan, Index, IndexLabel, align_union, validate_alignment_plan};
+use fp_io::{read_csv_str, write_csv_string};
 use fp_join::{JoinType, join_series};
 use fp_runtime::{
     DecodeProof, EvidenceLedger, RaptorQEnvelope, RaptorQMetadata, RuntimeMode, RuntimePolicy,
     ScrubStatus,
 };
-use fp_types::Scalar;
+use fp_types::{Scalar, dropna, fill_na, nansum};
 use raptorq::{Decoder, Encoder, EncodingPacket, ObjectTransmissionInformation};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -129,6 +130,24 @@ pub enum FixtureOperation {
     IndexAlignUnion,
     IndexHasDuplicates,
     IndexFirstPositions,
+    // FP-P2C-006: Join + concat
+    SeriesConcat,
+    // FP-P2C-007: Missingness + nanops
+    NanSum,
+    FillNa,
+    DropNa,
+    // FP-P2C-008: IO round-trip
+    CsvRoundTrip,
+    // FP-P2C-009: Storage invariants
+    ColumnDtypeCheck,
+    // FP-P2C-010: loc/iloc
+    SeriesFilter,
+    SeriesHead,
+    // FP-P2C-011: Full GroupBy aggregate matrix
+    #[serde(rename = "groupby_mean", alias = "group_by_mean")]
+    GroupByMean,
+    #[serde(rename = "groupby_count", alias = "group_by_count")]
+    GroupByCount,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -208,6 +227,16 @@ pub struct PacketFixture {
     pub expected_bool: Option<bool>,
     #[serde(default)]
     pub expected_positions: Option<Vec<Option<usize>>>,
+    #[serde(default)]
+    pub expected_scalar: Option<Scalar>,
+    #[serde(default)]
+    pub expected_dtype: Option<String>,
+    #[serde(default)]
+    pub fill_value: Option<Scalar>,
+    #[serde(default)]
+    pub head_n: Option<usize>,
+    #[serde(default)]
+    pub csv_input: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -475,6 +504,12 @@ struct OracleRequest {
     right: Option<FixtureSeries>,
     index: Option<Vec<IndexLabel>>,
     join_type: Option<FixtureJoinType>,
+    #[serde(default)]
+    fill_value: Option<Scalar>,
+    #[serde(default)]
+    head_n: Option<usize>,
+    #[serde(default)]
+    csv_input: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -490,6 +525,10 @@ struct OracleResponse {
     #[serde(default)]
     expected_positions: Option<Vec<Option<usize>>>,
     #[serde(default)]
+    expected_scalar: Option<Scalar>,
+    #[serde(default)]
+    expected_dtype: Option<String>,
+    #[serde(default)]
     error: Option<String>,
 }
 
@@ -500,6 +539,8 @@ enum ResolvedExpected {
     Alignment(FixtureExpectedAlignment),
     Bool(bool),
     Positions(Vec<Option<usize>>),
+    Scalar(Scalar),
+    Dtype(String),
 }
 
 pub fn run_packet_suite(config: &HarnessConfig) -> Result<PacketParityReport, HarnessError> {
@@ -1910,6 +1951,172 @@ fn run_fixture_operation(
             }
             Ok(())
         }
+        FixtureOperation::SeriesConcat => {
+            let left = require_left_series(fixture)?;
+            let right = require_right_series(fixture)?;
+            let left_s = build_series(left)?;
+            let right_s = build_series(right)?;
+            let actual = concat_series(&[&left_s, &right_s]).map_err(|err| err.to_string())?;
+            let expected = match expected {
+                ResolvedExpected::Series(series) => series,
+                _ => return Err("expected_series is required for series_concat".to_owned()),
+            };
+            compare_series_expected(&actual, &expected)
+        }
+        FixtureOperation::NanSum => {
+            let left = require_left_series(fixture)?;
+            let actual = nansum(&left.values);
+            let expected = match expected {
+                ResolvedExpected::Scalar(scalar) => scalar,
+                _ => return Err("expected_scalar is required for nan_sum".to_owned()),
+            };
+            compare_scalar(&actual, &expected, "nan_sum")
+        }
+        FixtureOperation::FillNa => {
+            let left = require_left_series(fixture)?;
+            let fill = fixture
+                .fill_value
+                .as_ref()
+                .ok_or_else(|| "fill_value is required for fill_na".to_owned())?;
+            let actual_values = fill_na(&left.values, fill);
+            let expected = match expected {
+                ResolvedExpected::Series(series) => series,
+                _ => return Err("expected_series is required for fill_na".to_owned()),
+            };
+            if actual_values != expected.values {
+                return Err(format!(
+                    "fill_na value mismatch: actual={actual_values:?}, expected={:?}",
+                    expected.values
+                ));
+            }
+            Ok(())
+        }
+        FixtureOperation::DropNa => {
+            let left = require_left_series(fixture)?;
+            let actual_values = dropna(&left.values);
+            let expected = match expected {
+                ResolvedExpected::Series(series) => series,
+                _ => return Err("expected_series is required for drop_na".to_owned()),
+            };
+            if actual_values != expected.values {
+                return Err(format!(
+                    "drop_na value mismatch: actual={actual_values:?}, expected={:?}",
+                    expected.values
+                ));
+            }
+            Ok(())
+        }
+        FixtureOperation::CsvRoundTrip => {
+            let csv_input = fixture
+                .csv_input
+                .as_ref()
+                .ok_or_else(|| "csv_input is required for csv_round_trip".to_owned())?;
+            let df = read_csv_str(csv_input).map_err(|err| err.to_string())?;
+            let output = write_csv_string(&df).map_err(|err| err.to_string())?;
+            let df2 = read_csv_str(&output).map_err(|err| err.to_string())?;
+            if df.column_names() != df2.column_names() {
+                return Err(format!(
+                    "csv round-trip column mismatch: {:?} vs {:?}",
+                    df.column_names(),
+                    df2.column_names()
+                ));
+            }
+            if df.len() != df2.len() {
+                return Err(format!(
+                    "csv round-trip row count mismatch: {} vs {}",
+                    df.len(),
+                    df2.len()
+                ));
+            }
+            let expected = match expected {
+                ResolvedExpected::Bool(value) => value,
+                _ => return Err("expected_bool is required for csv_round_trip".to_owned()),
+            };
+            if !expected {
+                return Err("csv round-trip expected to fail".to_owned());
+            }
+            Ok(())
+        }
+        FixtureOperation::ColumnDtypeCheck => {
+            let left = require_left_series(fixture)?;
+            let series = build_series(left)?;
+            let actual_dtype = format!("{:?}", series.column().dtype());
+            let expected = match expected {
+                ResolvedExpected::Dtype(dtype) => dtype,
+                _ => return Err("expected_dtype is required for column_dtype_check".to_owned()),
+            };
+            if actual_dtype != expected {
+                return Err(format!(
+                    "dtype mismatch: actual={actual_dtype}, expected={expected}"
+                ));
+            }
+            Ok(())
+        }
+        FixtureOperation::SeriesFilter => {
+            let left = require_left_series(fixture)?;
+            let right = require_right_series(fixture)?;
+            let data = build_series(left)?;
+            let mask = build_series(right)?;
+            let actual = data.filter(&mask).map_err(|err| err.to_string())?;
+            let expected = match expected {
+                ResolvedExpected::Series(series) => series,
+                _ => return Err("expected_series is required for series_filter".to_owned()),
+            };
+            compare_series_expected(&actual, &expected)
+        }
+        FixtureOperation::SeriesHead => {
+            let left = require_left_series(fixture)?;
+            let n = fixture
+                .head_n
+                .ok_or_else(|| "head_n is required for series_head".to_owned())?;
+            let series = build_series(left)?;
+            let take = n.min(series.len());
+            let labels = series.index().labels()[..take].to_vec();
+            let values = series.values()[..take].to_vec();
+            let actual =
+                Series::from_values(series.name(), labels, values).map_err(|e| e.to_string())?;
+            let expected = match expected {
+                ResolvedExpected::Series(series) => series,
+                _ => return Err("expected_series is required for series_head".to_owned()),
+            };
+            compare_series_expected(&actual, &expected)
+        }
+        FixtureOperation::GroupByMean => {
+            let keys = require_left_series(fixture)?;
+            let values = require_right_series(fixture)?;
+            let actual = groupby_mean(
+                &build_series(keys).map_err(|err| format!("keys series build failed: {err}"))?,
+                &build_series(values)
+                    .map_err(|err| format!("values series build failed: {err}"))?,
+                GroupByOptions::default(),
+                policy,
+                ledger,
+            )
+            .map_err(|err| err.to_string())?;
+            let expected = match expected {
+                ResolvedExpected::Series(series) => series,
+                _ => return Err("expected_series is required for groupby_mean".to_owned()),
+            };
+            compare_series_expected(&actual, &expected)
+        }
+        FixtureOperation::GroupByCount => {
+            let keys = require_left_series(fixture)?;
+            let values = require_right_series(fixture)?;
+            let actual = groupby_count(
+                &build_series(keys).map_err(|err| format!("keys series build failed: {err}"))?,
+                &build_series(values)
+                    .map_err(|err| format!("values series build failed: {err}"))?,
+                GroupByOptions::default(),
+                policy,
+                ledger,
+            )
+            .map_err(|err| err.to_string())?;
+            let expected = match expected {
+                ResolvedExpected::Series(series) => series,
+                _ => return Err("expected_series is required for groupby_count".to_owned()),
+            };
+            compare_series_expected(&actual, &expected)
+        }
     }
 }
 
@@ -1990,6 +2197,51 @@ fn fixture_expected(fixture: &PacketFixture) -> Result<ResolvedExpected, Harness
             .ok_or_else(|| {
                 HarnessError::FixtureFormat(format!(
                     "missing expected_positions for case {}",
+                    fixture.case_id
+                ))
+            }),
+        FixtureOperation::SeriesConcat
+        | FixtureOperation::FillNa
+        | FixtureOperation::DropNa
+        | FixtureOperation::SeriesFilter
+        | FixtureOperation::SeriesHead
+        | FixtureOperation::GroupByMean
+        | FixtureOperation::GroupByCount => fixture
+            .expected_series
+            .clone()
+            .map(ResolvedExpected::Series)
+            .ok_or_else(|| {
+                HarnessError::FixtureFormat(format!(
+                    "missing expected_series for case {}",
+                    fixture.case_id
+                ))
+            }),
+        FixtureOperation::NanSum => fixture
+            .expected_scalar
+            .clone()
+            .map(ResolvedExpected::Scalar)
+            .ok_or_else(|| {
+                HarnessError::FixtureFormat(format!(
+                    "missing expected_scalar for case {}",
+                    fixture.case_id
+                ))
+            }),
+        FixtureOperation::CsvRoundTrip => fixture
+            .expected_bool
+            .map(ResolvedExpected::Bool)
+            .ok_or_else(|| {
+                HarnessError::FixtureFormat(format!(
+                    "missing expected_bool for case {}",
+                    fixture.case_id
+                ))
+            }),
+        FixtureOperation::ColumnDtypeCheck => fixture
+            .expected_dtype
+            .clone()
+            .map(ResolvedExpected::Dtype)
+            .ok_or_else(|| {
+                HarnessError::FixtureFormat(format!(
+                    "missing expected_dtype for case {}",
                     fixture.case_id
                 ))
             }),
@@ -2098,6 +2350,36 @@ fn capture_live_oracle_expected(
             .ok_or_else(|| {
                 HarnessError::FixtureFormat("oracle omitted expected_positions".to_owned())
             }),
+        FixtureOperation::SeriesConcat
+        | FixtureOperation::FillNa
+        | FixtureOperation::DropNa
+        | FixtureOperation::SeriesFilter
+        | FixtureOperation::SeriesHead
+        | FixtureOperation::GroupByMean
+        | FixtureOperation::GroupByCount => response
+            .expected_series
+            .map(ResolvedExpected::Series)
+            .ok_or_else(|| {
+                HarnessError::FixtureFormat("oracle omitted expected_series".to_owned())
+            }),
+        FixtureOperation::NanSum => response
+            .expected_scalar
+            .map(ResolvedExpected::Scalar)
+            .ok_or_else(|| {
+                HarnessError::FixtureFormat("oracle omitted expected_scalar".to_owned())
+            }),
+        FixtureOperation::CsvRoundTrip => response
+            .expected_bool
+            .map(ResolvedExpected::Bool)
+            .ok_or_else(|| {
+                HarnessError::FixtureFormat("oracle omitted expected_bool".to_owned())
+            }),
+        FixtureOperation::ColumnDtypeCheck => response
+            .expected_dtype
+            .map(ResolvedExpected::Dtype)
+            .ok_or_else(|| {
+                HarnessError::FixtureFormat("oracle omitted expected_dtype".to_owned())
+            }),
     }
 }
 
@@ -2168,6 +2450,15 @@ fn compare_series_expected(
                 "value mismatch at idx={idx}: actual={left:?}, expected={right:?}"
             ));
         }
+    }
+    Ok(())
+}
+
+fn compare_scalar(actual: &Scalar, expected: &Scalar, op_name: &str) -> Result<(), String> {
+    if !actual.semantic_eq(expected) {
+        return Err(format!(
+            "{op_name} scalar mismatch: actual={actual:?}, expected={expected:?}"
+        ));
     }
     Ok(())
 }

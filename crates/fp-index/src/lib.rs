@@ -1050,10 +1050,7 @@ mod tests {
             "a".into(),
         ]);
         let uniq = index.unique();
-        assert_eq!(
-            uniq.labels(),
-            &["b".into(), "a".into(), "c".into()]
-        );
+        assert_eq!(uniq.labels(), &["b".into(), "a".into(), "c".into()]);
     }
 
     #[test]
@@ -1102,7 +1099,10 @@ mod tests {
         let left = Index::from_i64(vec![1, 1, 2]);
         let right = Index::from_i64(vec![1, 2, 2]);
         let result = left.intersection(&right);
-        assert_eq!(result.labels(), &[IndexLabel::Int64(1), IndexLabel::Int64(2)]);
+        assert_eq!(
+            result.labels(),
+            &[IndexLabel::Int64(1), IndexLabel::Int64(2)]
+        );
     }
 
     #[test]
@@ -1153,10 +1153,7 @@ mod tests {
     fn sort_values_produces_sorted_index() {
         let index = Index::new(vec!["c".into(), "a".into(), "b".into()]);
         let sorted = index.sort_values();
-        assert_eq!(
-            sorted.labels(),
-            &["a".into(), "b".into(), "c".into()]
-        );
+        assert_eq!(sorted.labels(), &["a".into(), "b".into(), "c".into()]);
     }
 
     #[test]
@@ -1471,7 +1468,11 @@ mod tests {
         let result = leapfrog_union(&[&a, &b]);
         assert_eq!(
             result.labels(),
-            &[IndexLabel::Int64(1), IndexLabel::Int64(2), IndexLabel::Int64(3)]
+            &[
+                IndexLabel::Int64(1),
+                IndexLabel::Int64(2),
+                IndexLabel::Int64(3)
+            ]
         );
         let plan = multi_way_align(&[&a, &b]);
         // Both map to identity positions
@@ -1506,8 +1507,14 @@ mod tests {
                 IndexLabel::Int64(5),
             ]
         );
-        assert_eq!(plan.positions[0], vec![Some(0), None, Some(1), None, Some(2)]);
-        assert_eq!(plan.positions[1], vec![None, Some(0), Some(1), Some(2), None]);
+        assert_eq!(
+            plan.positions[0],
+            vec![Some(0), None, Some(1), None, Some(2)]
+        );
+        assert_eq!(
+            plan.positions[1],
+            vec![None, Some(0), Some(1), Some(2), None]
+        );
         eprintln!("[AG-11-T] two_sorted_overlapping | in=[3,3] out=5 | PASS");
     }
 
@@ -1536,9 +1543,7 @@ mod tests {
 
     #[test]
     fn ag11t_single_element_indexes() {
-        let indexes: Vec<Index> = (0..10)
-            .map(|i| Index::from_i64(vec![i]))
-            .collect();
+        let indexes: Vec<Index> = (0..10).map(|i| Index::from_i64(vec![i])).collect();
         let refs: Vec<&Index> = indexes.iter().collect();
         let result = leapfrog_union(&refs);
         assert_eq!(result.len(), 10);
@@ -1555,7 +1560,11 @@ mod tests {
         let plan = multi_way_align(&refs);
         assert_eq!(
             plan.union_index.labels(),
-            &[IndexLabel::Int64(1), IndexLabel::Int64(2), IndexLabel::Int64(3)]
+            &[
+                IndexLabel::Int64(1),
+                IndexLabel::Int64(2),
+                IndexLabel::Int64(3)
+            ]
         );
         // All 5 inputs should have identity positions
         for pos_vec in &plan.positions {

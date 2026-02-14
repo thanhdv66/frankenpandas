@@ -8,6 +8,7 @@ fp-columnar = { path = "../fp-columnar" }
 fp-frame = { path = "../fp-frame" }
 fp-groupby = { path = "../fp-groupby" }
 fp-index = { path = "../fp-index" }
+fp-io = { path = "../fp-io" }
 fp-join = { path = "../fp-join" }
 fp-runtime = { path = "../fp-runtime" }
 fp-types = { path = "../fp-types" }

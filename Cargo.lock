@@ -255,6 +255,7 @@ version = "0.1.0"
 dependencies = [
  "fp-columnar",
  "fp-frame",
+ "fp-index",
  "fp-runtime",
  "fp-types",
  "serde",
@@ -304,6 +305,7 @@ dependencies = [
  "fp-frame",
  "fp-index",
  "fp-types",
+ "serde_json",
  "thiserror",
 ]
 

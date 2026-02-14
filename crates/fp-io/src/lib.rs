@@ -316,10 +316,11 @@ pub fn read_json_str(input: &str, orient: JsonOrient) -> Result<DataFrame, IoErr
                     .as_object()
                     .ok_or_else(|| IoError::JsonFormat("each record must be an object".into()))?;
                 for name in &col_names {
-                    let val = obj
-                        .get(name)
-                        .unwrap_or(&serde_json::Value::Null);
-                    columns.get_mut(name).unwrap().push(json_value_to_scalar(val));
+                    let val = obj.get(name).unwrap_or(&serde_json::Value::Null);
+                    columns
+                        .get_mut(name)
+                        .unwrap()
+                        .push(json_value_to_scalar(val));
                 }
             }
 
@@ -345,9 +346,9 @@ pub fn read_json_str(input: &str, orient: JsonOrient) -> Result<DataFrame, IoErr
                     .ok_or_else(|| IoError::JsonFormat("column data must be {idx: val}".into()))?;
                 let mut values: Vec<(i64, Scalar)> = Vec::with_capacity(col_obj.len());
                 for (idx_str, val) in col_obj {
-                    let idx: i64 = idx_str
-                        .parse()
-                        .map_err(|_| IoError::JsonFormat(format!("non-integer index: {idx_str}")))?;
+                    let idx: i64 = idx_str.parse().map_err(|_| {
+                        IoError::JsonFormat(format!("non-integer index: {idx_str}"))
+                    })?;
                     values.push((idx, json_value_to_scalar(val)));
                 }
                 values.sort_by_key(|(idx, _)| *idx);
@@ -390,7 +391,10 @@ pub fn read_json_str(input: &str, orient: JsonOrient) -> Result<DataFrame, IoErr
                     .ok_or_else(|| IoError::JsonFormat("each data row must be an array".into()))?;
                 for (i, name) in col_names.iter().enumerate() {
                     let val = arr.get(i).unwrap_or(&serde_json::Value::Null);
-                    columns.get_mut(name).unwrap().push(json_value_to_scalar(val));
+                    columns
+                        .get_mut(name)
+                        .unwrap()
+                        .push(json_value_to_scalar(val));
                 }
             }
 
@@ -759,7 +763,9 @@ mod tests {
 
     // === bd-2gi.19: IO Complete Contract Tests ===
 
-    use super::{CsvReadOptions, JsonOrient, read_csv_with_options, read_json_str, write_json_string};
+    use super::{
+        CsvReadOptions, JsonOrient, read_csv_with_options, read_json_str, write_json_string,
+    };
 
     #[test]
     fn csv_with_custom_delimiter() {

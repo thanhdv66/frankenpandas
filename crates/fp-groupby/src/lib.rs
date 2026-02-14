@@ -452,6 +452,9 @@ pub enum AggFunc {
     Max,
     First,
     Last,
+    Std,
+    Var,
+    Median,
 }
 
 /// Generic groupby aggregation supporting all standard aggregation functions.
@@ -522,6 +525,9 @@ pub fn groupby_agg(
         AggFunc::Max => "max",
         AggFunc::First => "first",
         AggFunc::Last => "last",
+        AggFunc::Std => "std",
+        AggFunc::Var => "var",
+        AggFunc::Median => "median",
     };
 
     let mut out_index = Vec::with_capacity(ordering.len());
@@ -578,6 +584,43 @@ pub fn groupby_agg(
                     Scalar::Null(NullKind::Null)
                 } else {
                     Scalar::Float64(vals[vals.len() - 1])
+                }
+            }
+            AggFunc::Var => {
+                if vals.len() < 2 {
+                    Scalar::Null(NullKind::Null)
+                } else {
+                    let n = vals.len() as f64;
+                    let mean = vals.iter().sum::<f64>() / n;
+                    let ss: f64 = vals.iter().map(|v| (v - mean).powi(2)).sum();
+                    Scalar::Float64(ss / (n - 1.0))
+                }
+            }
+            AggFunc::Std => {
+                if vals.len() < 2 {
+                    Scalar::Null(NullKind::Null)
+                } else {
+                    let n = vals.len() as f64;
+                    let mean = vals.iter().sum::<f64>() / n;
+                    let ss: f64 = vals.iter().map(|v| (v - mean).powi(2)).sum();
+                    Scalar::Float64((ss / (n - 1.0)).sqrt())
+                }
+            }
+            AggFunc::Median => {
+                if vals.is_empty() {
+                    Scalar::Null(NullKind::Null)
+                } else {
+                    let mut sorted = vals.clone();
+                    sorted.sort_unstable_by(|a, b| {
+                        a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
+                    });
+                    let mid = sorted.len() / 2;
+                    let median = if sorted.len().is_multiple_of(2) {
+                        (sorted[mid - 1] + sorted[mid]) / 2.0
+                    } else {
+                        sorted[mid]
+                    };
+                    Scalar::Float64(median)
                 }
             }
         };
@@ -653,6 +696,39 @@ pub fn groupby_last(
     ledger: &mut EvidenceLedger,
 ) -> Result<Series, GroupByError> {
     groupby_agg(keys, values, AggFunc::Last, options, policy, ledger)
+}
+
+/// Convenience: `groupby_std` (sample standard deviation per group, ddof=1).
+pub fn groupby_std(
+    keys: &Series,
+    values: &Series,
+    options: GroupByOptions,
+    policy: &RuntimePolicy,
+    ledger: &mut EvidenceLedger,
+) -> Result<Series, GroupByError> {
+    groupby_agg(keys, values, AggFunc::Std, options, policy, ledger)
+}
+
+/// Convenience: `groupby_var` (sample variance per group, ddof=1).
+pub fn groupby_var(
+    keys: &Series,
+    values: &Series,
+    options: GroupByOptions,
+    policy: &RuntimePolicy,
+    ledger: &mut EvidenceLedger,
+) -> Result<Series, GroupByError> {
+    groupby_agg(keys, values, AggFunc::Var, options, policy, ledger)
+}
+
+/// Convenience: `groupby_median` (median per group).
+pub fn groupby_median(
+    keys: &Series,
+    values: &Series,
+    options: GroupByOptions,
+    policy: &RuntimePolicy,
+    ledger: &mut EvidenceLedger,
+) -> Result<Series, GroupByError> {
+    groupby_agg(keys, values, AggFunc::Median, options, policy, ledger)
 }
 
 // ---------------------------------------------------------------------------
@@ -1684,7 +1760,7 @@ mod tests {
 
     use super::{
         AggFunc, groupby_agg, groupby_count, groupby_first, groupby_last, groupby_max,
-        groupby_mean, groupby_min,
+        groupby_mean, groupby_median, groupby_min, groupby_std, groupby_var,
     };
 
     fn make_grouped_data() -> (Series, Series) {
@@ -2034,6 +2110,236 @@ mod tests {
 
         // First-seen order: c, a, b
         assert_eq!(out.index().labels(), &["c".into(), "a".into(), "b".into()]);
+    }
+
+    // === Std, Var, Median GroupBy Aggregation Tests ===
+
+    #[test]
+    fn groupby_std_basic() {
+        let (keys, values) = make_grouped_data();
+        let mut ledger = EvidenceLedger::new();
+        let out = groupby_std(
+            &keys,
+            &values,
+            GroupByOptions::default(),
+            &RuntimePolicy::strict(),
+            &mut ledger,
+        )
+        .unwrap();
+
+        assert_eq!(out.index().labels(), &["a".into(), "b".into()]);
+        // a: std([10, 30]) = sqrt(((10-20)^2 + (30-20)^2) / 1) = sqrt(200) ≈ 14.142
+        // b: std([20, 40]) = sqrt(((20-30)^2 + (40-30)^2) / 1) = sqrt(200) ≈ 14.142
+        let a_std = match &out.values()[0] {
+            Scalar::Float64(v) => *v,
+            _ => panic!("expected Float64"),
+        };
+        assert!((a_std - 200.0_f64.sqrt()).abs() < 1e-10, "a std={a_std}");
+        assert_eq!(out.name(), "std");
+    }
+
+    #[test]
+    fn groupby_var_basic() {
+        let (keys, values) = make_grouped_data();
+        let mut ledger = EvidenceLedger::new();
+        let out = groupby_var(
+            &keys,
+            &values,
+            GroupByOptions::default(),
+            &RuntimePolicy::strict(),
+            &mut ledger,
+        )
+        .unwrap();
+
+        assert_eq!(out.index().labels(), &["a".into(), "b".into()]);
+        // a: var([10, 30]) = ((10-20)^2 + (30-20)^2) / 1 = 200.0
+        // b: var([20, 40]) = ((20-30)^2 + (40-30)^2) / 1 = 200.0
+        assert_eq!(
+            out.values(),
+            &[Scalar::Float64(200.0), Scalar::Float64(200.0)]
+        );
+        assert_eq!(out.name(), "var");
+    }
+
+    #[test]
+    fn groupby_median_basic() {
+        let keys = Series::from_values(
+            "key",
+            vec![
+                0_i64.into(),
+                1_i64.into(),
+                2_i64.into(),
+                3_i64.into(),
+                4_i64.into(),
+            ],
+            vec![
+                Scalar::Utf8("a".into()),
+                Scalar::Utf8("a".into()),
+                Scalar::Utf8("a".into()),
+                Scalar::Utf8("b".into()),
+                Scalar::Utf8("b".into()),
+            ],
+        )
+        .unwrap();
+        let values = Series::from_values(
+            "val",
+            vec![
+                0_i64.into(),
+                1_i64.into(),
+                2_i64.into(),
+                3_i64.into(),
+                4_i64.into(),
+            ],
+            vec![
+                Scalar::Int64(10),
+                Scalar::Int64(20),
+                Scalar::Int64(30),
+                Scalar::Int64(5),
+                Scalar::Int64(15),
+            ],
+        )
+        .unwrap();
+
+        let mut ledger = EvidenceLedger::new();
+        let out = groupby_median(
+            &keys,
+            &values,
+            GroupByOptions::default(),
+            &RuntimePolicy::strict(),
+            &mut ledger,
+        )
+        .unwrap();
+
+        assert_eq!(out.index().labels(), &["a".into(), "b".into()]);
+        // a: median([10, 20, 30]) = 20.0
+        // b: median([5, 15]) = (5+15)/2 = 10.0
+        assert_eq!(
+            out.values(),
+            &[Scalar::Float64(20.0), Scalar::Float64(10.0)]
+        );
+        assert_eq!(out.name(), "median");
+    }
+
+    #[test]
+    fn groupby_std_single_value_returns_null() {
+        let keys =
+            Series::from_values("key", vec![0_i64.into()], vec![Scalar::Utf8("a".into())]).unwrap();
+        let values =
+            Series::from_values("val", vec![0_i64.into()], vec![Scalar::Int64(42)]).unwrap();
+
+        let mut ledger = EvidenceLedger::new();
+        let out = groupby_std(
+            &keys,
+            &values,
+            GroupByOptions::default(),
+            &RuntimePolicy::strict(),
+            &mut ledger,
+        )
+        .unwrap();
+
+        // std of a single value is NaN/null (ddof=1, n-1=0)
+        assert!(out.values()[0].is_missing());
+    }
+
+    #[test]
+    fn groupby_var_with_nulls_skips_missing() {
+        let keys = Series::from_values(
+            "key",
+            vec![0_i64.into(), 1_i64.into(), 2_i64.into()],
+            vec![
+                Scalar::Utf8("a".into()),
+                Scalar::Utf8("a".into()),
+                Scalar::Utf8("a".into()),
+            ],
+        )
+        .unwrap();
+        let values = Series::from_values(
+            "val",
+            vec![0_i64.into(), 1_i64.into(), 2_i64.into()],
+            vec![
+                Scalar::Int64(10),
+                Scalar::Null(NullKind::Null),
+                Scalar::Int64(30),
+            ],
+        )
+        .unwrap();
+
+        let mut ledger = EvidenceLedger::new();
+        let out = groupby_var(
+            &keys,
+            &values,
+            GroupByOptions::default(),
+            &RuntimePolicy::strict(),
+            &mut ledger,
+        )
+        .unwrap();
+
+        // var([10, 30], ddof=1) = ((10-20)^2 + (30-20)^2) / 1 = 200.0
+        assert_eq!(out.values(), &[Scalar::Float64(200.0)]);
+    }
+
+    #[test]
+    fn groupby_median_even_count() {
+        let keys = Series::from_values(
+            "key",
+            vec![0_i64.into(), 1_i64.into(), 2_i64.into(), 3_i64.into()],
+            vec![
+                Scalar::Utf8("a".into()),
+                Scalar::Utf8("a".into()),
+                Scalar::Utf8("a".into()),
+                Scalar::Utf8("a".into()),
+            ],
+        )
+        .unwrap();
+        let values = Series::from_values(
+            "val",
+            vec![0_i64.into(), 1_i64.into(), 2_i64.into(), 3_i64.into()],
+            vec![
+                Scalar::Int64(1),
+                Scalar::Int64(2),
+                Scalar::Int64(3),
+                Scalar::Int64(4),
+            ],
+        )
+        .unwrap();
+
+        let mut ledger = EvidenceLedger::new();
+        let out = groupby_median(
+            &keys,
+            &values,
+            GroupByOptions::default(),
+            &RuntimePolicy::strict(),
+            &mut ledger,
+        )
+        .unwrap();
+
+        // median([1, 2, 3, 4]) = (2+3)/2 = 2.5
+        assert_eq!(out.values(), &[Scalar::Float64(2.5)]);
+    }
+
+    #[test]
+    fn groupby_agg_empty_input_std_var_median() {
+        let keys =
+            Series::from_values("key", Vec::<IndexLabel>::new(), Vec::<Scalar>::new()).unwrap();
+        let values =
+            Series::from_values("val", Vec::<IndexLabel>::new(), Vec::<Scalar>::new()).unwrap();
+
+        let mut ledger = EvidenceLedger::new();
+        for func in [AggFunc::Std, AggFunc::Var, AggFunc::Median] {
+            let out = groupby_agg(
+                &keys,
+                &values,
+                func,
+                GroupByOptions::default(),
+                &RuntimePolicy::strict(),
+                &mut ledger,
+            )
+            .unwrap();
+            assert!(
+                out.is_empty(),
+                "empty input should give empty output for {func:?}"
+            );
+        }
     }
 
     // === AG-12: Sketching / Streaming Aggregation Tests ===

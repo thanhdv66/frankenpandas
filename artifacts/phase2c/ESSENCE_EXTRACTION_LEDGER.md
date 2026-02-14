@@ -2,7 +2,7 @@
 
 Date: 2026-02-14
 Bead: `bd-2gi.1`
-Status: in-progress foundation ledger (initial populated coverage for FP-P2C-001..005)
+Status: in-progress foundation ledger (full coverage for FP-P2C-001..011; conformance harness pending for 006..011)
 
 ## 0. Purpose
 
@@ -177,141 +177,220 @@ Each packet row in this document and its packet-local artifacts must maintain:
   - `artifacts/phase2c/FP-P2C-005/contract_table.md`
   - `artifacts/phase2c/FP-P2C-005/risk_note.md`
 
-### FP-P2C-006 — Join + concat semantics (provisional until packet artifacts land)
+### FP-P2C-006 — Join + concat semantics
 
 - Legacy anchors:
   - `pandas/core/reshape/merge.py` (`merge`, `_MergeOperation`, `get_join_indexers`)
-  - `pandas/core/reshape/concat.py` (`concat`, `_get_result`, `_make_concat_multiindex`)
-- Behavioral invariants (provisional):
-  - join cardinality must match key multiplicity semantics for each join mode in scope,
-  - concat axis semantics preserve declared ordering/promotion rules,
-  - null-side handling is deterministic and explicit by mode.
-- Hidden assumptions (provisional):
-  - first implementation slice may scope join mode matrix and concat axis combinations before full matrix completion.
-- Undefined-behavior edges (until extraction complete):
-  - full merge/concat option matrix and interaction space.
+  - `pandas/core/reshape/concat.py` (`concat`, `_Concatenator`, `_get_result`, `_make_concat_multiindex`)
+  - `pandas/core/indexes/base.py` (`Index.join`, `Index.union`, `Index.intersection`)
+- Behavioral invariants:
+  - join cardinality matches key multiplicity semantics for each join mode (inner, left),
+  - duplicate keys expand to deterministic cross-product cardinality with nested-loop ordering,
+  - concat axis-0 preserves declared index ordering,
+  - null-side handling is deterministic: left join inserts missing for unmatched right keys.
+- Hidden assumptions:
+  - scoped to inner and left join modes; right and outer deferred,
+  - concat scoped to axis-0; axis-1 concat deferred,
+  - multi-column merge keys not yet supported.
+- Undefined-behavior edges:
+  - full merge/concat option matrix (suffixes, indicator, validate),
+  - right/outer join modes,
+  - axis-1 concat with index alignment,
+  - MultiIndex join/concat behavior.
 - Strict/hardened divergence:
   - strict: fail-closed on unknown mode/metadata combinations,
   - hardened: bounded allowlisted defenses only.
-- Explicit non-goals (temporary):
-  - none at program level; packet-level temporary exclusions must be explicitly listed and retired.
+- Explicit non-goals:
+  - multi-column merges,
+  - right/outer join modes (deferred),
+  - axis-1 concat (deferred).
 - Sources:
-  - `PHASE2C_EXTRACTION_PACKET.md`
+  - `artifacts/phase2c/FP-P2C-006/legacy_anchor_map.md`
+  - `artifacts/phase2c/FP-P2C-006/contract_table.md`
+  - `artifacts/phase2c/FP-P2C-006/risk_note.md`
 
-### FP-P2C-007 — Missingness + nanops reductions (provisional until packet artifacts land)
+### FP-P2C-007 — Missingness + nanops reductions
 
 - Legacy anchors:
   - `pandas/core/missing.py` (`mask_missing`, `clean_fill_method`, `interpolate_2d_inplace`)
-  - `pandas/core/nanops.py` (`nansum`, `nanmean`, `nanmedian`, `nanvar`, `nancorr`)
-- Behavioral invariants (provisional):
-  - missing propagation remains monotonic under composed operations,
+  - `pandas/core/nanops.py` (`nansum`, `nanmean`, `nanmedian`, `nanvar`, `nancorr`, `_ensure_numeric`)
+  - `pandas/core/dtypes/missing.py` (`isna`, `notna`, `is_valid_na_for_dtype`)
+- Behavioral invariants:
+  - missing propagation is monotonic under composed operations (null in -> null out),
   - NaN/NaT/null distinctions are preserved at observable API boundaries,
-  - reduction defaults and numeric coercion are deterministic.
-- Hidden assumptions (provisional):
-  - dtype-specific missing marker normalization remains centralized in scalar/column contracts.
-- Undefined-behavior edges (until extraction complete):
-  - full nanops option matrix and edge-case tolerance behavior.
+  - reduction defaults and numeric coercion are deterministic (`skipna=True` default),
+  - nansum of all-NaN returns 0.0; nanmean of all-NaN returns NaN,
+  - fillna replaces missing values with cast scalar; dropna removes missing rows.
+- Hidden assumptions:
+  - NaN and Null both treated as missing in reductions (no NaN-vs-Null distinction in aggregation),
+  - dtype-specific missing marker normalization is centralized in scalar/column contracts,
+  - `skipna` parameter is always true (no `skipna=False` path implemented).
+- Undefined-behavior edges:
+  - full nanops option matrix (`skipna=False`, `min_count` parameter),
+  - `interpolate` and `bfill`/`ffill` methods,
+  - NaN-vs-NaT distinction in datetime operations.
 - Strict/hardened divergence:
   - strict: fail-closed on unknown coercion/reduction ambiguity,
   - hardened: explicit bounded recovery only.
-- Explicit non-goals (temporary):
-  - none at program level; temporary packet exclusions require explicit drift ledger entries.
+- Explicit non-goals:
+  - `skipna=False` paths,
+  - interpolation methods,
+  - `min_count` parameter.
 - Sources:
-  - `PHASE2C_EXTRACTION_PACKET.md`
+  - `artifacts/phase2c/FP-P2C-007/legacy_anchor_map.md`
+  - `artifacts/phase2c/FP-P2C-007/contract_table.md`
+  - `artifacts/phase2c/FP-P2C-007/risk_note.md`
 
-### FP-P2C-008 — IO first-wave contract (provisional until packet artifacts land)
+### FP-P2C-008 — IO first-wave contract (CSV + JSON)
 
 - Legacy anchors:
-  - parser/formatter entry points in `pandas/io/*` (CSV + schema normalization first wave).
-- Behavioral invariants (provisional):
-  - parser normalization is deterministic for scoped dialect/support,
+  - `pandas/io/parsers/readers.py` (`read_csv`, `TextFileReader`)
+  - `pandas/io/parsers/c_parser_wrapper.py` (C-backed CSV parser)
+  - `pandas/io/json/_json.py` (`read_json`, `to_json`, orient parameter dispatch)
+  - `pandas/io/common.py` (IO path resolution, compression, encoding)
+- Behavioral invariants:
+  - CSV parser normalization is deterministic for scoped dialect (delimiter, header, index_col),
   - malformed input paths are fail-closed with deterministic diagnostics,
-  - round-trip stability is preserved for supported schema/value surface.
-- Hidden assumptions (provisional):
-  - first wave is intentionally scoped while retaining strict compatibility for included IO paths.
-- Undefined-behavior edges (until extraction complete):
-  - full IO breadth beyond first-wave formats/options.
+  - round-trip stability is preserved for supported schema/value surface,
+  - JSON orient modes (records, columns, split, values, index) produce deterministic output,
+  - dtype inference follows explicit priority: Int64 -> Float64 -> Utf8.
+- Hidden assumptions:
+  - first wave scoped to CSV and JSON formats only,
+  - encoding is UTF-8 only; no codepage support,
+  - compression not yet supported,
+  - CSV parser is pure Rust (no C-backed parser).
+- Undefined-behavior edges:
+  - full CSV option matrix (quoting, escaping, encoding, thousands separator),
+  - full JSON option matrix (date_format, default_handler, lines mode),
+  - non-CSV/JSON IO formats (Excel, Parquet, SQL, HDF5),
+  - chunked/streaming read for large files.
 - Strict/hardened divergence:
   - strict: fail-closed on unsupported metadata/features,
   - hardened: bounded parser recovery for allowlisted corruption classes.
-- Explicit non-goals (temporary):
-  - none at program level; packet-local exclusions must be enumerated and tracked.
+- Explicit non-goals:
+  - non-CSV/JSON formats,
+  - compression/decompression,
+  - non-UTF-8 encoding,
+  - chunked/streaming reads.
 - Sources:
-  - `PHASE2C_EXTRACTION_PACKET.md`
+  - `artifacts/phase2c/FP-P2C-008/legacy_anchor_map.md`
+  - `artifacts/phase2c/FP-P2C-008/contract_table.md`
+  - `artifacts/phase2c/FP-P2C-008/risk_note.md`
 
-### FP-P2C-009 — BlockManager + storage invariants (deep scope, provisional until packet artifacts land)
+### FP-P2C-009 — BlockManager + storage invariants (per-column model)
 
 - Legacy anchors:
   - `pandas/core/internals/managers.py` (`BaseBlockManager`, `BlockManager`, `SingleBlockManager`, `create_block_manager_from_blocks`, `_consolidate`)
-- Behavioral invariants (provisional):
-  - block placement and axis mappings are internally consistent (`blknos`/`blklocs`-class invariants),
-  - consolidation rules preserve observable dtype/null semantics,
+  - `pandas/core/internals/blocks.py` (`Block`, `DatetimeTZBlock`, `ExtensionBlock`)
+  - `pandas/core/internals/construction.py` (`arrays_to_mgr`, `dict_to_mgr`)
+- Behavioral invariants:
+  - per-column storage with independently typed columns and packed bitvec validity masks,
+  - ValidityMask length must equal values length (enforced at construction),
+  - dtype is locked at construction and propagated deterministically through operations,
   - storage transforms do not silently corrupt downstream frame/index contracts.
-- Hidden assumptions (provisional):
-  - low-level storage invariants may require dedicated witness ledgers beyond high-level API fixture parity.
-- Undefined-behavior edges (until extraction complete):
-  - full BlockManager operation matrix and internals migration boundaries.
+- Hidden assumptions:
+  - no BlockManager equivalent: FrankenPandas uses per-column storage, not blocked storage,
+  - no consolidation pass: each column is independently typed and stored,
+  - storage invariants are simpler than pandas due to per-column model.
+- Undefined-behavior edges:
+  - full BlockManager operation matrix and internals migration boundaries,
+  - in-place mutation semantics (pandas copy-on-write vs immutable columns),
+  - memory layout optimization (Arrow-compatible, SIMD alignment),
+  - block consolidation and deconsolidation paths.
 - Strict/hardened divergence:
   - strict: invariant breach is fail-closed,
   - hardened: bounded containment with mandatory forensic logging.
-- Explicit non-goals (temporary):
-  - none; deep-scope packet targets full scoped storage invariant parity.
+- Explicit non-goals:
+  - BlockManager consolidation,
+  - in-place mutation,
+  - Arrow-compatible memory layouts.
 - Sources:
-  - `PHASE2C_EXTRACTION_PACKET.md`
+  - `artifacts/phase2c/FP-P2C-009/legacy_anchor_map.md`
+  - `artifacts/phase2c/FP-P2C-009/contract_table.md`
+  - `artifacts/phase2c/FP-P2C-009/risk_note.md`
   - `bd-2gi.24` design notes
 
-### FP-P2C-010 — Full `loc`/`iloc` branch-path semantics (deep scope, provisional until packet artifacts land)
+### FP-P2C-010 — Full `loc`/`iloc` branch-path semantics
 
 - Legacy anchors:
   - `pandas/core/indexing.py` (`_LocIndexer`, `_iLocIndexer`, `check_bool_indexer`, `convert_missing_indexer`)
-- Behavioral invariants (provisional):
-  - branch-path decisions are deterministic and mode-consistent,
-  - boolean/indexer coercion semantics preserve pandas-observable contracts,
-  - missing-label/indexer error classes remain explicit.
-- Hidden assumptions (provisional):
+  - `pandas/core/indexes/base.py` (`Index.get_loc`, `Index.get_indexer`, `Index.slice_locs`)
+  - `pandas/core/series.py` (`__getitem__`, `__setitem__`, `_get_with`)
+- Behavioral invariants:
+  - boolean mask indexing treats null values as false (not selected),
+  - mask length must match target length exactly,
+  - filter preserves selected labels in original order,
+  - head/tail provide positional slicing with bounds clamping.
+- Hidden assumptions:
+  - full `loc`/`iloc` API not yet implemented; current coverage is boolean mask filtering and head/tail,
+  - scalar label lookup, list-of-labels selection, and label-slice selection are deferred,
   - coercion and indexer normalization logic spans multiple helper paths requiring branch matrix extraction.
-- Undefined-behavior edges (until extraction complete):
-  - full indexing branch matrix including advanced mixed indexer combinations.
+- Undefined-behavior edges:
+  - full `loc` branch matrix (scalar, list, slice, callable, boolean),
+  - full `iloc` branch matrix (scalar, list, slice, boolean),
+  - mixed indexer combinations,
+  - `__setitem__` assignment paths,
+  - advanced boolean indexer with MultiIndex.
 - Strict/hardened divergence:
   - strict: fail-closed on unsupported branch surfaces,
   - hardened: allowlisted bounded continuation with decision ledger.
-- Explicit non-goals (temporary):
-  - none; deep-scope packet targets full scoped `loc`/`iloc` parity.
+- Explicit non-goals:
+  - full loc/iloc API beyond boolean mask and positional slicing,
+  - setitem assignment paths,
+  - MultiIndex indexing.
 - Sources:
-  - `PHASE2C_EXTRACTION_PACKET.md`
+  - `artifacts/phase2c/FP-P2C-010/legacy_anchor_map.md`
+  - `artifacts/phase2c/FP-P2C-010/contract_table.md`
+  - `artifacts/phase2c/FP-P2C-010/risk_note.md`
   - `bd-2gi.25` design notes
 
-### FP-P2C-011 — Full GroupBy planner split/apply/combine + aggregate matrix (deep scope, provisional until packet artifacts land)
+### FP-P2C-011 — Full GroupBy planner split/apply/combine + aggregate matrix
 
 - Legacy anchors:
   - `pandas/core/groupby/grouper.py` (`Grouper`, `Grouping`, `get_grouper`)
-  - `pandas/core/groupby/ops.py` planner/ops surface (`WrappedCythonOp`, `BaseGrouper`, `BinGrouper`, `DataSplitter`)
-- Behavioral invariants (provisional):
-  - planner decisions preserve grouping key determinism and output ordering contracts,
-  - aggregate matrix preserves dtype/null semantics and default-option behavior,
-  - split/apply/combine orchestration is reproducible under strict/hardened policy gates.
-- Hidden assumptions (provisional):
-  - multi-aggregate planner behavior has high interaction complexity and requires explicit witness tables.
-- Undefined-behavior edges (until extraction complete):
-  - full aggregate planner matrix and categorical/multi-key corner cases.
+  - `pandas/core/groupby/ops.py` (`WrappedCythonOp`, `BaseGrouper`, `BinGrouper`, `DataSplitter`)
+  - `pandas/core/groupby/groupby.py` (`GroupBy`, `SeriesGroupBy`, `DataFrameGroupBy`)
+  - `pandas/core/groupby/generic.py` (aggregation dispatch)
+- Behavioral invariants:
+  - first-seen key encounter order defines output ordering when `sort=False`,
+  - aggregate matrix preserves dtype/null semantics (Sum, Mean, Count, Min, Max, First, Last, Std, Var, Median),
+  - `dropna=True` excludes null keys from grouping,
+  - each aggregate function has defined semantics for empty and all-null groups,
+  - dense Int64 fast path and arena-backed path produce identical output to generic path.
+- Hidden assumptions:
+  - single-key series groupby only; multi-key DataFrame groupby deferred,
+  - no `transform`, `filter`, or `apply` paths implemented,
+  - no `observed` parameter for categorical key handling.
+- Undefined-behavior edges:
+  - full aggregate planner matrix (custom functions, named aggregation),
+  - multi-key DataFrame groupby semantics,
+  - categorical key handling with `observed` parameter,
+  - `transform`, `filter`, `apply` paths,
+  - rolling/expanding window aggregation.
 - Strict/hardened divergence:
   - strict: zero critical drift tolerated,
   - hardened: divergence only in explicit allowlisted defensive classes.
-- Explicit non-goals (temporary):
-  - none; deep-scope packet targets full scoped GroupBy planner parity.
+- Explicit non-goals:
+  - multi-key DataFrame groupby,
+  - transform/filter/apply paths,
+  - rolling/expanding window aggregation,
+  - custom aggregation functions.
 - Sources:
-  - `PHASE2C_EXTRACTION_PACKET.md`
+  - `artifacts/phase2c/FP-P2C-011/legacy_anchor_map.md`
+  - `artifacts/phase2c/FP-P2C-011/contract_table.md`
+  - `artifacts/phase2c/FP-P2C-011/risk_note.md`
   - `bd-2gi.26` design notes
 
 ## 4. Coverage Gaps (Actionable)
 
 The following are required to fully satisfy `bd-2gi.1` and are currently incomplete:
 
-1. FP-P2C-001..005 now include packet-local type/rule/error ledgers and invariant hook sections, but FP-P2C-006..011 still need equivalent extraction coverage.
+1. ~~FP-P2C-006..011 need equivalent extraction coverage.~~ DONE: All packets now have legacy_anchor_map.md, contract_table.md, and risk_note.md.
 2. Rule ledgers for 001..005 need branch-level predicate/default detail expansion to complete the full extraction payload contract depth.
 3. Error ledgers for 001..005 need finalized exception message-class capture against pandas oracle text where scoped.
 4. Invariant-to-counterexample/remediation linkage must be completed once packet differential mismatch corpora are generated for all active packets.
-5. FP-P2C-006..011 now have provisional rows in this ledger; each row must be upgraded to fully extracted packet-local evidence once their artifact sets are produced.
+5. ~~FP-P2C-006..011 provisional rows must be upgraded.~~ DONE: All provisional entries upgraded to extracted entries with packet-local artifact sources.
+6. FP-P2C-006..011 need conformance harness integration (fixture_manifest.json, parity_gate.yaml, parity artifacts).
 
 ## 5. Resolution Policy for Legacy Ambiguity
 
