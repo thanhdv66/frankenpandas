@@ -1395,6 +1395,21 @@ pub enum CiGate {
 }
 
 impl CiGate {
+    /// Stable rule identifier for forensic reports.
+    pub fn rule_id(self) -> &'static str {
+        match self {
+            Self::G1Compile => "G1",
+            Self::G2Lint => "G2",
+            Self::G3Unit => "G3",
+            Self::G4Property => "G4",
+            Self::G4_5Fuzz => "G4.5",
+            Self::G5Integration => "G5",
+            Self::G6Conformance => "G6",
+            Self::G7Coverage => "G7",
+            Self::G8E2e => "G8",
+        }
+    }
+
     /// Gate ordering index for pipeline sequencing.
     pub fn order(self) -> u8 {
         match self {
@@ -1428,15 +1443,34 @@ impl CiGate {
     /// Shell command(s) for this gate (when run via external CI).
     pub fn commands(self) -> Vec<&'static str> {
         match self {
-            Self::G1Compile => vec!["cargo check --all-targets", "cargo fmt --check"],
-            Self::G2Lint => vec!["cargo clippy --workspace --all-targets"],
+            Self::G1Compile => vec!["cargo check --workspace --all-targets", "cargo fmt --check"],
+            Self::G2Lint => vec!["cargo clippy --workspace --all-targets -- -D warnings"],
             Self::G3Unit => vec!["cargo test --workspace --lib"],
-            Self::G4Property => vec!["cargo test --workspace --test proptest_properties"],
+            Self::G4Property => vec!["cargo test -p fp-conformance --test proptest_properties"],
             Self::G4_5Fuzz => vec![], // nightly only, defined in ADVERSARIAL_FUZZ_CORPUS.md
-            Self::G5Integration => vec!["cargo test --workspace --test smoke"],
+            Self::G5Integration => vec!["cargo test -p fp-conformance --test smoke"],
             Self::G6Conformance => vec!["cargo test -p fp-conformance -- --nocapture"],
             Self::G7Coverage => vec!["cargo llvm-cov --workspace --summary-only"],
             Self::G8E2e => vec![], // Rust-native, uses run_e2e_suite()
+        }
+    }
+
+    /// One-command reproduction string for failure forensics.
+    #[must_use]
+    pub fn repro_command(self) -> String {
+        let commands = self.commands();
+        if !commands.is_empty() {
+            return commands.join(" && ");
+        }
+
+        match self {
+            Self::G4_5Fuzz => {
+                "cargo fuzz run <target>  # see artifacts/phase2c/ADVERSARIAL_FUZZ_CORPUS.md"
+                    .to_owned()
+            }
+            Self::G8E2e => "cargo test -p fp-conformance --test ag_e2e -- --nocapture".to_owned(),
+            // All remaining gates should define shell commands.
+            _ => format!("cargo run -p fp-conformance --bin fp-ci-gates -- --gate {self:?}"),
         }
     }
 
@@ -1492,6 +1526,34 @@ pub struct CiPipelineResult {
     pub elapsed_ms: u64,
 }
 
+/// Gate-level forensic result with stable identifiers and replay metadata.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CiGateForensicsEntry {
+    pub rule_id: String,
+    pub gate: CiGate,
+    pub order: u8,
+    pub label: String,
+    pub passed: bool,
+    pub elapsed_ms: u64,
+    pub summary: String,
+    pub errors: Vec<String>,
+    pub commands: Vec<String>,
+    pub repro_cmd: String,
+}
+
+/// Machine-readable CI forensic report for G1..G8 gate failures.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CiForensicsReport {
+    pub generated_unix_ms: u128,
+    pub all_passed: bool,
+    pub first_failure: Option<CiGate>,
+    pub elapsed_ms: u64,
+    pub passed_count: usize,
+    pub total_count: usize,
+    pub gate_results: Vec<CiGateForensicsEntry>,
+    pub violations: Vec<CiGateForensicsEntry>,
+}
+
 impl CiPipelineResult {
     pub fn passed_count(&self) -> usize {
         self.gates.iter().filter(|g| g.passed).count()
@@ -1499,6 +1561,52 @@ impl CiPipelineResult {
 
     pub fn total_count(&self) -> usize {
         self.gates.len()
+    }
+}
+
+/// Build a deterministic, machine-readable forensic report from a CI pipeline run.
+#[must_use]
+pub fn build_ci_forensics_report(result: &CiPipelineResult) -> CiForensicsReport {
+    let mut gate_results = Vec::with_capacity(result.gates.len());
+    let mut violations = Vec::new();
+
+    for gate in &result.gates {
+        let entry = CiGateForensicsEntry {
+            rule_id: gate.gate.rule_id().to_owned(),
+            gate: gate.gate,
+            order: gate.gate.order(),
+            label: gate.gate.label().to_owned(),
+            passed: gate.passed,
+            elapsed_ms: gate.elapsed_ms,
+            summary: gate.summary.clone(),
+            errors: gate.errors.clone(),
+            commands: gate
+                .gate
+                .commands()
+                .into_iter()
+                .map(ToOwned::to_owned)
+                .collect(),
+            repro_cmd: gate.gate.repro_command(),
+        };
+        if !entry.passed {
+            violations.push(entry.clone());
+        }
+        gate_results.push(entry);
+    }
+
+    let generated_unix_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis());
+
+    CiForensicsReport {
+        generated_unix_ms,
+        all_passed: result.all_passed,
+        first_failure: result.first_failure,
+        elapsed_ms: result.elapsed_ms,
+        passed_count: result.passed_count(),
+        total_count: result.total_count(),
+        gate_results,
+        violations,
     }
 }
 
@@ -2374,15 +2482,11 @@ fn capture_live_oracle_expected(
         FixtureOperation::CsvRoundTrip => response
             .expected_bool
             .map(ResolvedExpected::Bool)
-            .ok_or_else(|| {
-                HarnessError::FixtureFormat("oracle omitted expected_bool".to_owned())
-            }),
+            .ok_or_else(|| HarnessError::FixtureFormat("oracle omitted expected_bool".to_owned())),
         FixtureOperation::ColumnDtypeCheck => response
             .expected_dtype
             .map(ResolvedExpected::Dtype)
-            .ok_or_else(|| {
-                HarnessError::FixtureFormat("oracle omitted expected_dtype".to_owned())
-            }),
+            .ok_or_else(|| HarnessError::FixtureFormat("oracle omitted expected_dtype".to_owned())),
     }
 }
 
@@ -2724,8 +2828,7 @@ fn execute_and_compare_differential(
             let right = require_right_series(fixture)?;
             let left_s = build_series(left).map_err(|err| format!("left build: {err}"))?;
             let right_s = build_series(right).map_err(|err| format!("right build: {err}"))?;
-            let actual =
-                concat_series(&[&left_s, &right_s]).map_err(|err| err.to_string())?;
+            let actual = concat_series(&[&left_s, &right_s]).map_err(|err| err.to_string())?;
             let expected = match expected {
                 ResolvedExpected::Series(s) => s,
                 _ => return Err("expected_series required for series_concat".to_owned()),
@@ -3752,11 +3855,12 @@ mod tests {
         FailureForensicsReport, FixtureExpectedAlignment, FixtureOperation, FixtureOracleSource,
         ForensicEventKind, ForensicLog, HarnessConfig, LifecycleHooks, NoopHooks, OracleMode,
         PacketParityReport, RaptorQSidecarArtifact, SuiteOptions, append_phase2c_drift_history,
-        build_differential_report, build_failure_forensics, enforce_packet_gates, evaluate_ci_gate,
-        evaluate_parity_gate, generate_raptorq_sidecar, run_ci_pipeline, run_differential_by_id,
-        run_differential_suite, run_e2e_suite, run_packet_by_id, run_packet_suite,
-        run_packet_suite_with_options, run_packets_grouped, run_raptorq_decode_recovery_drill,
-        run_smoke, verify_all_sidecars_ci, verify_packet_sidecar_integrity,
+        build_ci_forensics_report, build_differential_report, build_failure_forensics,
+        enforce_packet_gates, evaluate_ci_gate, evaluate_parity_gate, generate_raptorq_sidecar,
+        run_ci_pipeline, run_differential_by_id, run_differential_suite, run_e2e_suite,
+        run_packet_by_id, run_packet_suite, run_packet_suite_with_options, run_packets_grouped,
+        run_raptorq_decode_recovery_drill, run_smoke, verify_all_sidecars_ci,
+        verify_packet_sidecar_integrity,
     };
     use fp_runtime::RuntimeMode;
 
@@ -4727,5 +4831,57 @@ mod tests {
             "conformance gate should pass: {}",
             result
         );
+    }
+
+    #[test]
+    fn ci_gate_rule_ids_are_stable_and_nonempty() {
+        let expected = vec![
+            (CiGate::G1Compile, "G1"),
+            (CiGate::G2Lint, "G2"),
+            (CiGate::G3Unit, "G3"),
+            (CiGate::G4Property, "G4"),
+            (CiGate::G4_5Fuzz, "G4.5"),
+            (CiGate::G5Integration, "G5"),
+            (CiGate::G6Conformance, "G6"),
+            (CiGate::G7Coverage, "G7"),
+            (CiGate::G8E2e, "G8"),
+        ];
+        for (gate, rule_id) in expected {
+            assert_eq!(gate.rule_id(), rule_id);
+            assert!(!gate.repro_command().is_empty());
+        }
+    }
+
+    #[test]
+    fn ci_forensics_report_collects_violations_with_replay_commands() {
+        let pipeline = CiPipelineResult {
+            gates: vec![
+                CiGateResult {
+                    gate: CiGate::G1Compile,
+                    passed: true,
+                    elapsed_ms: 10,
+                    summary: "ok".to_owned(),
+                    errors: vec![],
+                },
+                CiGateResult {
+                    gate: CiGate::G2Lint,
+                    passed: false,
+                    elapsed_ms: 20,
+                    summary: "lint failed".to_owned(),
+                    errors: vec!["clippy warning".to_owned()],
+                },
+            ],
+            all_passed: false,
+            first_failure: Some(CiGate::G2Lint),
+            elapsed_ms: 30,
+        };
+
+        let report = build_ci_forensics_report(&pipeline);
+        assert_eq!(report.passed_count, 1);
+        assert_eq!(report.total_count, 2);
+        assert_eq!(report.violations.len(), 1);
+        assert_eq!(report.violations[0].rule_id, "G2");
+        assert!(report.violations[0].repro_cmd.contains("cargo clippy"));
+        assert_eq!(report.violations[0].errors.len(), 1);
     }
 }
