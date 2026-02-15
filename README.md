@@ -4,7 +4,7 @@
   <img src="frankenpandas_illustration.webp" alt="FrankenPandas - Clean-room Rust reimplementation of pandas">
 </div>
 
-FrankenPandas is a clean-room Rust reimplementation targeting grand-scope excellence: semantic fidelity, mathematical rigor, operational safety, and profile-proven performance.
+FrankenPandas is a clean-room Rust reimplementation targeting ABSOLUTE AND TOTAL feature/functionality overlap with pandas as a true drop-in replacement, with semantic fidelity, mathematical rigor, operational safety, and profile-proven performance.
 
 ## What Makes This Project Special
 
@@ -14,12 +14,13 @@ This is treated as a core identity constraint, not a best-effort nice-to-have.
 
 ## Methodological DNA
 
-This project uses four pervasive disciplines:
+This project uses five pervasive disciplines:
 
 1. alien-artifact-coding for decision theory, confidence calibration, and explainability.
 2. extreme-software-optimization for profile-first, proof-backed performance work.
-3. RaptorQ-everywhere for self-healing durability of long-lived artifacts and state.
-4. frankenlibc/frankenfs compatibility-security thinking: strict vs hardened mode separation, fail-closed compatibility gates, and explicit drift ledgers.
+3. alien-graveyard for high-EV systems patterns and optimization levers.
+4. RaptorQ-everywhere for self-healing durability of long-lived artifacts and state.
+5. frankenlibc/frankenfs compatibility-security thinking: strict vs hardened mode separation, fail-closed compatibility gates, and explicit drift ledgers.
 
 ## Current State
 
