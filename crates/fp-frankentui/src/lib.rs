@@ -9,8 +9,9 @@ use fp_conformance::{
     CaseStatus, DecodeProofArtifact, DecodeProofStatus, DifferentialReport, DifferentialResult,
     DriftLevel, E2eConfig, E2eReport, FailureForensicsReport, FixtureOracleSource, ForensicEvent,
     ForensicEventKind, HarnessConfig, HarnessError, NoopHooks, OracleMode, PacketDriftHistoryEntry,
-    PacketGateResult, PacketParityReport, SuiteOptions, build_failure_forensics,
-    run_differential_by_id, run_differential_suite, run_e2e_suite,
+    PacketGateResult, PacketParityReport, SidecarIntegrityResult, SuiteOptions,
+    build_failure_forensics, run_differential_by_id, run_differential_suite, run_e2e_suite,
+    verify_packet_sidecar_integrity,
 };
 use fp_runtime::{ConformalGuard, EvidenceLedger, RuntimeMode, RuntimePolicy, decision_to_card};
 use serde::de::DeserializeOwned;
@@ -69,6 +70,85 @@ impl PacketSnapshot {
             .as_ref()
             .is_some_and(PacketParityReport::is_green)
             && self.gate_result.as_ref().is_some_and(|gate| gate.pass)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FinalEvidencePacketSnapshot {
+    pub packet_id: String,
+    pub gate_pass: Option<bool>,
+    pub parity_green: bool,
+    pub decode_status: Option<DecodeProofStatus>,
+    pub sidecar_integrity_ok: bool,
+    pub sidecar_integrity_errors: Vec<String>,
+    pub artifact_issues: Vec<ArtifactIssue>,
+    pub risk_notes: Vec<String>,
+}
+
+impl FinalEvidencePacketSnapshot {
+    #[must_use]
+    pub fn is_green(&self) -> bool {
+        self.gate_pass == Some(true)
+            && self.parity_green
+            && self.decode_status == Some(DecodeProofStatus::Recovered)
+            && self.sidecar_integrity_ok
+            && self.artifact_issues.is_empty()
+            && self.risk_notes.is_empty()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FinalEvidencePackSnapshot {
+    pub phase2c_root: PathBuf,
+    pub packets: Vec<FinalEvidencePacketSnapshot>,
+    pub total_packets: usize,
+    pub parity_gate_passed: usize,
+    pub parity_gate_failed: usize,
+    pub parity_gate_missing: usize,
+    pub sidecar_integrity_passed: usize,
+    pub sidecar_integrity_failed: usize,
+    pub decode_recovered: usize,
+    pub decode_failed_or_missing: usize,
+    pub all_checks_passed: bool,
+    pub risk_notes: Vec<String>,
+}
+
+impl FinalEvidencePackSnapshot {
+    #[must_use]
+    pub fn render_plain(&self) -> String {
+        let mut out = String::new();
+        out.push_str(&format!(
+            "FinalEvidence packets={} all_checks_passed={} parity[pass={},fail={},missing={}] sidecar[pass={},fail={}] decode[recovered={},failed_or_missing={}] risk_notes={}\n",
+            self.total_packets,
+            self.all_checks_passed,
+            self.parity_gate_passed,
+            self.parity_gate_failed,
+            self.parity_gate_missing,
+            self.sidecar_integrity_passed,
+            self.sidecar_integrity_failed,
+            self.decode_recovered,
+            self.decode_failed_or_missing,
+            self.risk_notes.len(),
+        ));
+        out.push_str(&format!("phase2c_root={}\n", self.phase2c_root.display()));
+        for packet in &self.packets {
+            out.push_str(&format!(
+                "- {} gate={} parity_green={} decode_status={} sidecar_ok={} artifact_issues={} risk_notes={}\n",
+                packet.packet_id,
+                packet
+                    .gate_pass
+                    .map_or_else(|| "missing".to_owned(), |pass| pass.to_string()),
+                packet.parity_green,
+                packet
+                    .decode_status
+                    .as_ref()
+                    .map_or_else(|| "missing".to_owned(), ToString::to_string),
+                packet.sidecar_integrity_ok,
+                packet.artifact_issues.len(),
+                packet.risk_notes.len(),
+            ));
+        }
+        out
     }
 }
 
@@ -806,6 +886,7 @@ impl FtuiAppState {
 pub trait FtuiDataSource {
     fn discover_packet_ids(&self) -> Result<Vec<String>, FtuiError>;
     fn load_packet_snapshot(&self, packet_id: &str) -> Result<PacketSnapshot, FtuiError>;
+    fn load_final_evidence_pack(&self) -> Result<FinalEvidencePackSnapshot, FtuiError>;
     fn load_drift_history(&self) -> Result<DriftHistorySnapshot, FtuiError>;
     fn load_conformance_dashboard(&self) -> Result<ConformanceDashboardSnapshot, FtuiError>;
     fn load_forensic_log(&self, path: &Path) -> Result<ForensicLogSnapshot, FtuiError>;
@@ -923,6 +1004,73 @@ impl FtuiDataSource for FsFtuiDataSource {
             differential_report,
             differential_validation,
             issues,
+        })
+    }
+
+    fn load_final_evidence_pack(&self) -> Result<FinalEvidencePackSnapshot, FtuiError> {
+        self.ensure_root_exists()?;
+        let mut packet_ids = self.discover_packet_ids()?;
+        packet_ids.sort();
+
+        let mut packets = Vec::with_capacity(packet_ids.len());
+        let mut risk_notes = Vec::new();
+        for packet_id in packet_ids {
+            let packet = self.load_packet_snapshot(&packet_id)?;
+            let integrity =
+                verify_packet_sidecar_integrity(&self.phase2c_root.join(&packet_id), &packet_id);
+            let evidence_packet = build_final_evidence_packet_snapshot(packet, integrity);
+            risk_notes.extend(
+                evidence_packet
+                    .risk_notes
+                    .iter()
+                    .map(|note| format!("{packet_id}: {note}")),
+            );
+            packets.push(evidence_packet);
+        }
+
+        packets.sort_by(|left, right| left.packet_id.cmp(&right.packet_id));
+        risk_notes.sort();
+        risk_notes.dedup();
+
+        let total_packets = packets.len();
+        let parity_gate_passed = packets
+            .iter()
+            .filter(|packet| packet.gate_pass == Some(true))
+            .count();
+        let parity_gate_failed = packets
+            .iter()
+            .filter(|packet| packet.gate_pass == Some(false))
+            .count();
+        let parity_gate_missing = packets
+            .iter()
+            .filter(|packet| packet.gate_pass.is_none())
+            .count();
+        let sidecar_integrity_passed = packets
+            .iter()
+            .filter(|packet| packet.sidecar_integrity_ok)
+            .count();
+        let sidecar_integrity_failed = total_packets.saturating_sub(sidecar_integrity_passed);
+        let decode_recovered = packets
+            .iter()
+            .filter(|packet| packet.decode_status == Some(DecodeProofStatus::Recovered))
+            .count();
+        let decode_failed_or_missing = total_packets.saturating_sub(decode_recovered);
+        let all_checks_passed =
+            total_packets > 0 && packets.iter().all(FinalEvidencePacketSnapshot::is_green);
+
+        Ok(FinalEvidencePackSnapshot {
+            phase2c_root: self.phase2c_root.clone(),
+            packets,
+            total_packets,
+            parity_gate_passed,
+            parity_gate_failed,
+            parity_gate_missing,
+            sidecar_integrity_passed,
+            sidecar_integrity_failed,
+            decode_recovered,
+            decode_failed_or_missing,
+            all_checks_passed,
+            risk_notes,
         })
     }
 
@@ -1090,6 +1238,89 @@ struct GovernanceGateReport {
     violation_count: usize,
 }
 
+fn build_final_evidence_packet_snapshot(
+    packet: PacketSnapshot,
+    sidecar_integrity: SidecarIntegrityResult,
+) -> FinalEvidencePacketSnapshot {
+    let risk_notes = collect_packet_risk_notes(&packet, &sidecar_integrity);
+    let PacketSnapshot {
+        packet_id,
+        parity_report,
+        gate_result,
+        decode_status,
+        mismatch_count: _,
+        differential_report: _,
+        differential_validation: _,
+        issues,
+    } = packet;
+
+    let parity_green = parity_report
+        .as_ref()
+        .is_some_and(PacketParityReport::is_green);
+    let gate_pass = gate_result.as_ref().map(|gate| gate.pass);
+    FinalEvidencePacketSnapshot {
+        packet_id,
+        gate_pass,
+        parity_green,
+        decode_status,
+        sidecar_integrity_ok: sidecar_integrity.is_ok(),
+        sidecar_integrity_errors: sidecar_integrity.errors,
+        artifact_issues: issues,
+        risk_notes,
+    }
+}
+
+fn collect_packet_risk_notes(
+    packet: &PacketSnapshot,
+    sidecar_integrity: &SidecarIntegrityResult,
+) -> Vec<String> {
+    let mut notes = Vec::new();
+    match packet.gate_result.as_ref() {
+        Some(gate) if !gate.pass => {
+            if gate.reasons.is_empty() {
+                notes.push("parity gate failed without explicit reasons".to_owned());
+            } else {
+                notes.push(format!("parity gate failed: {}", gate.reasons.join("; ")));
+            }
+        }
+        None => notes.push("missing parity gate result".to_owned()),
+        Some(_) => {}
+    }
+
+    match packet.parity_report.as_ref() {
+        Some(report) if !report.is_green() => {
+            notes.push(format!(
+                "parity report not green: passed={} failed={}",
+                report.passed, report.failed
+            ));
+        }
+        None => notes.push("missing or unreadable parity report".to_owned()),
+        Some(_) => {}
+    }
+
+    match packet.decode_status.as_ref() {
+        Some(DecodeProofStatus::Recovered) => {}
+        Some(status) => notes.push(format!("decode proof status is {status}")),
+        None => notes.push("missing decode proof status".to_owned()),
+    }
+
+    if !sidecar_integrity.is_ok() {
+        notes.extend(sidecar_integrity.errors.iter().cloned());
+    }
+    notes.extend(packet.issues.iter().map(|issue| {
+        format!(
+            "artifact issue ({:?}) {}: {}",
+            issue.kind,
+            issue.path.display(),
+            issue.detail
+        )
+    }));
+
+    notes.sort();
+    notes.dedup();
+    notes
+}
+
 fn read_json_optional<T: DeserializeOwned>(
     path: &Path,
     issues: &mut Vec<ArtifactIssue>,
@@ -1221,15 +1452,17 @@ mod tests {
         summarize_decision_dashboard, summarize_differential_validation,
     };
     use fp_conformance::{
-        CaseStatus, ComparisonCategory, DifferentialReport, DifferentialResult, DriftLevel,
-        DriftRecord, E2eReport, FixtureOperation, FixtureOracleSource, ForensicEventKind,
-        HarnessConfig, OracleMode, PacketDriftHistoryEntry,
+        CaseStatus, ComparisonCategory, DecodeProofArtifact, DecodeProofStatus, DifferentialReport,
+        DifferentialResult, DriftLevel, DriftRecord, E2eReport, FixtureOperation,
+        FixtureOracleSource, ForensicEventKind, HarnessConfig, OracleMode, PacketDriftHistoryEntry,
+        generate_raptorq_sidecar, run_raptorq_decode_recovery_drill,
     };
     use fp_runtime::{EvidenceLedger, RuntimePolicy};
     use proptest::prelude::*;
     use serde_json::json;
     use std::fs;
     use std::hint::black_box;
+    use std::path::Path;
     use std::time::Instant;
     use tempfile::tempdir;
 
@@ -1360,6 +1593,98 @@ mod tests {
             quantile_from_sorted(&samples_ns, 95),
             quantile_from_sorted(&samples_ns, 99),
         )
+    }
+
+    fn write_packet_with_raptorq_artifacts(packet_root: &Path, packet_id: &str, gate_pass: bool) {
+        let parity_payload = json!({
+            "suite": "phase2c_packets",
+            "packet_id": packet_id,
+            "oracle_present": true,
+            "fixture_count": 1,
+            "passed": if gate_pass { 1 } else { 0 },
+            "failed": if gate_pass { 0 } else { 1 },
+            "results": []
+        })
+        .to_string();
+        fs::write(packet_root.join("parity_report.json"), &parity_payload).expect("write parity");
+        fs::write(
+            packet_root.join("parity_gate_result.json"),
+            json!({
+                "packet_id": packet_id,
+                "pass": gate_pass,
+                "fixture_count": 1,
+                "strict_total": 1,
+                "strict_failed": if gate_pass { 0 } else { 1 },
+                "hardened_total": 0,
+                "hardened_failed": 0,
+                "reasons": if gate_pass {
+                    Vec::<String>::new()
+                } else {
+                    vec!["forced gate failure".to_owned()]
+                }
+            })
+            .to_string(),
+        )
+        .expect("write gate");
+        fs::write(
+            packet_root.join("parity_mismatch_corpus.json"),
+            json!({
+                "packet_id": packet_id,
+                "mismatch_count": if gate_pass { 0 } else { 1 },
+                "mismatches": []
+            })
+            .to_string(),
+        )
+        .expect("write mismatch corpus");
+
+        let parity_bytes = parity_payload.as_bytes();
+        let mut sidecar = generate_raptorq_sidecar(
+            &format!("{packet_id}/parity_report"),
+            "conformance",
+            parity_bytes,
+            8,
+        )
+        .expect("generate sidecar");
+        let proof =
+            run_raptorq_decode_recovery_drill(&sidecar, parity_bytes).expect("decode drill");
+        sidecar.envelope.decode_proofs = vec![proof.clone()];
+        sidecar.envelope.scrub.status = "ok".to_owned();
+        sidecar.scrub_report.status = "ok".to_owned();
+        sidecar.scrub_report.source_hash_verified = true;
+        sidecar.scrub_report.invalid_packets = 0;
+        fs::write(
+            packet_root.join("parity_report.raptorq.json"),
+            serde_json::to_string_pretty(&sidecar).expect("serialize sidecar"),
+        )
+        .expect("write sidecar");
+
+        let proof_artifact = DecodeProofArtifact {
+            packet_id: packet_id.to_owned(),
+            decode_proofs: vec![proof],
+            status: DecodeProofStatus::Recovered,
+        };
+        fs::write(
+            packet_root.join("parity_report.decode_proof.json"),
+            serde_json::to_string_pretty(&proof_artifact).expect("serialize proof"),
+        )
+        .expect("write decode proof");
+    }
+
+    fn tamper_decode_proof_hash(packet_root: &Path) {
+        let proof_path = packet_root.join("parity_report.decode_proof.json");
+        let mut proof: DecodeProofArtifact =
+            serde_json::from_str(&fs::read_to_string(&proof_path).expect("read decode proof"))
+                .expect("parse decode proof");
+        assert!(
+            !proof.decode_proofs.is_empty(),
+            "expected decode proof entries"
+        );
+        proof.decode_proofs[0].proof_hash = "sha256:deadbeef".to_owned();
+        fs::write(
+            proof_path,
+            serde_json::to_string_pretty(&proof).expect("serialize tampered decode proof"),
+        )
+        .expect("write tampered decode proof");
     }
 
     #[test]
@@ -1961,6 +2286,70 @@ mod tests {
         assert_eq!(dashboard.failing_packets, 1);
         assert_eq!(dashboard.packet_trends.len(), 2);
         assert!(dashboard.render_plain().contains("Conformance packets=2"));
+    }
+
+    #[test]
+    fn final_evidence_pack_reports_green_packet_and_render_summary() {
+        let dir = tempdir().expect("tempdir");
+        let packet_root = dir.path().join("artifacts/phase2c/FP-P2C-001");
+        fs::create_dir_all(&packet_root).expect("packet root");
+        write_packet_with_raptorq_artifacts(&packet_root, "FP-P2C-001", true);
+
+        let source = FsFtuiDataSource::from_repo_root(dir.path());
+        let evidence = source
+            .load_final_evidence_pack()
+            .expect("load final evidence pack");
+
+        assert_eq!(evidence.total_packets, 1);
+        assert_eq!(evidence.parity_gate_passed, 1);
+        assert_eq!(evidence.parity_gate_failed, 0);
+        assert_eq!(evidence.parity_gate_missing, 0);
+        assert_eq!(evidence.sidecar_integrity_passed, 1);
+        assert_eq!(evidence.sidecar_integrity_failed, 0);
+        assert_eq!(evidence.decode_recovered, 1);
+        assert_eq!(evidence.decode_failed_or_missing, 0);
+        assert!(evidence.all_checks_passed);
+        assert!(evidence.risk_notes.is_empty());
+        assert_eq!(evidence.packets.len(), 1);
+        assert!(evidence.packets[0].is_green());
+
+        let rendered = evidence.render_plain();
+        assert!(rendered.contains("FinalEvidence packets=1 all_checks_passed=true"));
+        assert!(rendered.contains("- FP-P2C-001 gate=true"));
+    }
+
+    #[test]
+    fn final_evidence_pack_flags_decode_proof_hash_mismatch_risk() {
+        let dir = tempdir().expect("tempdir");
+        let packet_root = dir.path().join("artifacts/phase2c/FP-P2C-001");
+        fs::create_dir_all(&packet_root).expect("packet root");
+        write_packet_with_raptorq_artifacts(&packet_root, "FP-P2C-001", true);
+        tamper_decode_proof_hash(&packet_root);
+
+        let source = FsFtuiDataSource::from_repo_root(dir.path());
+        let evidence = source
+            .load_final_evidence_pack()
+            .expect("load final evidence pack");
+
+        assert_eq!(evidence.total_packets, 1);
+        assert!(!evidence.all_checks_passed);
+        assert_eq!(evidence.sidecar_integrity_passed, 0);
+        assert_eq!(evidence.sidecar_integrity_failed, 1);
+        assert_eq!(evidence.decode_recovered, 1);
+        assert_eq!(evidence.decode_failed_or_missing, 0);
+        assert!(!evidence.risk_notes.is_empty());
+        assert!(evidence.risk_notes.iter().any(|note| note.contains(
+            "decode proof hash mismatch between sidecar envelope and decode proof artifact"
+        )));
+        assert!(!evidence.packets[0].is_green());
+        assert!(!evidence.packets[0].sidecar_integrity_ok);
+        assert!(
+            evidence.packets[0]
+                .risk_notes
+                .iter()
+                .any(|note| note.contains("decode proof hash mismatch")),
+            "expected decode-proof pairing risk note"
+        );
     }
 
     #[test]
