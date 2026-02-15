@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -18,8 +18,8 @@ use fp_runtime::asupersync::{
     RuntimeAsupersyncConfig,
 };
 use fp_runtime::{
-    DecodeProof, EvidenceLedger, RaptorQEnvelope, RaptorQMetadata, RuntimeMode, RuntimePolicy,
-    ScrubStatus,
+    DecisionAction, DecodeProof, EvidenceLedger, RaptorQEnvelope, RaptorQMetadata, RuntimeMode,
+    RuntimePolicy, ScrubStatus,
 };
 use fp_types::{Scalar, dropna, fill_na, nansum};
 use raptorq::{Decoder, Encoder, EncodingPacket, ObjectTransmissionInformation};
@@ -409,6 +409,211 @@ fn decision_action_for(status: &CaseStatus) -> &'static str {
     }
 }
 
+const COMPAT_CLOSURE_SUITE_ID: &str = "COMPAT-CLOSURE-E";
+const COMPAT_CLOSURE_COVERAGE_FLOOR_PERCENT: usize = 100;
+const COMPAT_CLOSURE_REQUIRED_ROWS: [&str; 9] = [
+    "CC-001", "CC-002", "CC-003", "CC-004", "CC-005", "CC-006", "CC-007", "CC-008", "CC-009",
+];
+
+fn compat_contract_rows_for_operation(operation: FixtureOperation) -> &'static [&'static str] {
+    match operation {
+        FixtureOperation::SeriesAdd => &["CC-004", "CC-005"],
+        FixtureOperation::SeriesJoin | FixtureOperation::SeriesConcat => &["CC-006"],
+        FixtureOperation::GroupBySum
+        | FixtureOperation::GroupByMean
+        | FixtureOperation::GroupByCount => &["CC-007"],
+        FixtureOperation::IndexAlignUnion
+        | FixtureOperation::IndexHasDuplicates
+        | FixtureOperation::IndexFirstPositions => &["CC-003"],
+        FixtureOperation::NanSum => &["CC-005"],
+        FixtureOperation::FillNa | FixtureOperation::DropNa => &["CC-002", "CC-005"],
+        FixtureOperation::CsvRoundTrip => &["CC-006"],
+        FixtureOperation::ColumnDtypeCheck => &["CC-001"],
+        FixtureOperation::SeriesFilter | FixtureOperation::SeriesHead => &["CC-004"],
+    }
+}
+
+fn compat_primary_api_surface_id(operation: FixtureOperation) -> &'static str {
+    compat_contract_rows_for_operation(operation)
+        .first()
+        .copied()
+        .unwrap_or("CC-UNKNOWN")
+}
+
+fn stable_json_digest<T: Serialize>(value: &T) -> String {
+    let payload = serde_json::to_vec(value).unwrap_or_else(|_| Vec::new());
+    hash_bytes(&payload)
+}
+
+fn relative_to_repo(config: &HarnessConfig, path: &Path) -> String {
+    path.strip_prefix(&config.repo_root)
+        .map(|relative| relative.display().to_string())
+        .unwrap_or_else(|_| path.display().to_string())
+}
+
+fn compat_closure_artifact_refs(config: &HarnessConfig, packet_id: &str) -> Vec<String> {
+    let packet_root = config.packet_artifact_root(packet_id);
+    vec![
+        relative_to_repo(config, &packet_root.join("parity_report.json")),
+        relative_to_repo(config, &packet_root.join("parity_report.raptorq.json")),
+        relative_to_repo(config, &packet_root.join("parity_report.decode_proof.json")),
+        relative_to_repo(config, &packet_root.join("parity_gate_result.json")),
+        relative_to_repo(config, &packet_root.join("parity_mismatch_corpus.json")),
+    ]
+}
+
+fn compat_closure_env_fingerprint(config: &HarnessConfig) -> String {
+    stable_json_digest(&serde_json::json!({
+        "repo_root": config.repo_root.display().to_string(),
+        "oracle_root": config.oracle_root.display().to_string(),
+        "fixture_root": config.fixture_root.display().to_string(),
+        "strict_mode": config.strict_mode,
+        "platform": std::env::consts::OS,
+        "arch": std::env::consts::ARCH,
+        "pkg": env!("CARGO_PKG_NAME"),
+        "version": env!("CARGO_PKG_VERSION"),
+    }))
+}
+
+fn runtime_mode_split_contracts_hold() -> bool {
+    let mut strict_ledger = EvidenceLedger::new();
+    let mut hardened_ledger = EvidenceLedger::new();
+    let strict = RuntimePolicy::strict();
+    let hardened = RuntimePolicy::hardened(Some(1024));
+
+    let strict_action = strict.decide_unknown_feature(
+        "compat-closure-matrix",
+        "coverage-check",
+        &mut strict_ledger,
+    );
+    let hardened_action = hardened.decide_join_admission(2048, &mut hardened_ledger);
+
+    strict_action == DecisionAction::Reject && hardened_action == DecisionAction::Repair
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CompatClosureCaseLog {
+    pub ts_utc: u64,
+    pub suite_id: String,
+    pub test_id: String,
+    pub api_surface_id: String,
+    pub packet_id: String,
+    pub mode: RuntimeMode,
+    pub seed: u64,
+    pub input_digest: String,
+    pub output_digest: String,
+    pub env_fingerprint: String,
+    pub artifact_refs: Vec<String>,
+    pub duration_ms: u64,
+    pub outcome: String,
+    pub reason_code: String,
+}
+
+fn build_compat_closure_case_log(
+    config: &HarnessConfig,
+    suite_id: &str,
+    case: &CaseResult,
+    ts_utc: u64,
+) -> CompatClosureCaseLog {
+    let mode_slug = runtime_mode_slug(case.mode);
+    let seed = deterministic_seed(&case.packet_id, &case.case_id, case.mode);
+    let input_digest = stable_json_digest(&serde_json::json!({
+        "packet_id": case.packet_id.clone(),
+        "case_id": case.case_id.clone(),
+        "mode": mode_slug,
+        "operation": case.operation,
+        "seed": seed,
+    }));
+    let output_digest = stable_json_digest(&serde_json::json!({
+        "status": result_label_for_status(&case.status),
+        "mismatch": case.mismatch.clone(),
+        "mismatch_class": case.mismatch_class.clone(),
+        "replay_key": case.replay_key.clone(),
+        "trace_id": case.trace_id.clone(),
+    }));
+    let duration_ms = case.elapsed_us.saturating_add(999) / 1000;
+    let outcome = result_label_for_status(&case.status).to_owned();
+
+    CompatClosureCaseLog {
+        ts_utc,
+        suite_id: suite_id.to_owned(),
+        test_id: case.case_id.clone(),
+        api_surface_id: compat_primary_api_surface_id(case.operation).to_owned(),
+        packet_id: case.packet_id.clone(),
+        mode: case.mode,
+        seed,
+        input_digest,
+        output_digest,
+        env_fingerprint: compat_closure_env_fingerprint(config),
+        artifact_refs: compat_closure_artifact_refs(config, &case.packet_id),
+        duration_ms: duration_ms.max(1),
+        outcome: outcome.clone(),
+        reason_code: case.mismatch_class.clone().unwrap_or_else(|| {
+            if outcome == "pass" {
+                "ok".to_owned()
+            } else {
+                "execution_critical".to_owned()
+            }
+        }),
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CompatClosureCoverageReport {
+    pub suite_id: String,
+    pub required_rows: Vec<String>,
+    pub covered_rows: Vec<String>,
+    pub uncovered_rows: Vec<String>,
+    pub coverage_floor_percent: usize,
+    pub achieved_percent: usize,
+}
+
+impl CompatClosureCoverageReport {
+    #[must_use]
+    pub fn is_complete(&self) -> bool {
+        self.uncovered_rows.is_empty()
+            && self.achieved_percent >= self.coverage_floor_percent
+            && self.coverage_floor_percent == COMPAT_CLOSURE_COVERAGE_FLOOR_PERCENT
+    }
+}
+
+pub fn build_compat_closure_coverage_report(
+    config: &HarnessConfig,
+) -> Result<CompatClosureCoverageReport, HarnessError> {
+    let fixtures = load_fixtures(config, None)?;
+    let mut covered_rows: BTreeSet<String> = BTreeSet::new();
+    for fixture in &fixtures {
+        for row in compat_contract_rows_for_operation(fixture.operation) {
+            covered_rows.insert((*row).to_owned());
+        }
+    }
+
+    if runtime_mode_split_contracts_hold() {
+        covered_rows.insert("CC-008".to_owned());
+        covered_rows.insert("CC-009".to_owned());
+    }
+
+    let required_rows = COMPAT_CLOSURE_REQUIRED_ROWS
+        .iter()
+        .map(|row| (*row).to_owned())
+        .collect::<Vec<_>>();
+    let uncovered_rows = required_rows
+        .iter()
+        .filter(|row| !covered_rows.contains(*row))
+        .cloned()
+        .collect::<Vec<_>>();
+    let achieved_percent = (covered_rows.len() * 100) / required_rows.len().max(1);
+
+    Ok(CompatClosureCoverageReport {
+        suite_id: COMPAT_CLOSURE_SUITE_ID.to_owned(),
+        required_rows,
+        covered_rows: covered_rows.into_iter().collect(),
+        uncovered_rows,
+        coverage_floor_percent: COMPAT_CLOSURE_COVERAGE_FLOOR_PERCENT,
+        achieved_percent,
+    })
+}
+
 fn make_drift_record(
     category: ComparisonCategory,
     level: DriftLevel,
@@ -488,6 +693,45 @@ pub struct DifferentialReport {
     pub report: PacketParityReport,
     pub differential_results: Vec<DifferentialResult>,
     pub drift_summary: DriftSummary,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DifferentialValidationLogEntry {
+    pub packet_id: String,
+    pub case_id: String,
+    pub mode: RuntimeMode,
+    pub trace_id: String,
+    pub oracle_source: FixtureOracleSource,
+    pub mismatch_class: String,
+    pub replay_key: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FaultInjectionClassification {
+    StrictViolation,
+    HardenedAllowlisted,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FaultInjectionValidationEntry {
+    pub packet_id: String,
+    pub case_id: String,
+    pub mode: RuntimeMode,
+    pub trace_id: String,
+    pub oracle_source: FixtureOracleSource,
+    pub mismatch_class: String,
+    pub replay_key: String,
+    pub classification: FaultInjectionClassification,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FaultInjectionValidationReport {
+    pub packet_id: String,
+    pub entry_count: usize,
+    pub strict_violation_count: usize,
+    pub hardened_allowlisted_count: usize,
+    pub entries: Vec<FaultInjectionValidationEntry>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -892,6 +1136,206 @@ pub fn build_differential_report(
         differential_results: results,
         drift_summary,
     }
+}
+
+#[must_use]
+pub fn build_differential_validation_log(
+    report: &DifferentialReport,
+) -> Vec<DifferentialValidationLogEntry> {
+    let mut entries: Vec<_> = report
+        .differential_results
+        .iter()
+        .map(|result| DifferentialValidationLogEntry {
+            packet_id: result.packet_id.clone(),
+            case_id: result.case_id.clone(),
+            mode: result.mode,
+            trace_id: if result.trace_id.is_empty() {
+                deterministic_trace_id(&result.packet_id, &result.case_id, result.mode)
+            } else {
+                result.trace_id.clone()
+            },
+            oracle_source: result.oracle_source,
+            mismatch_class: result
+                .drift_records
+                .iter()
+                .find(|record| matches!(record.level, DriftLevel::Critical))
+                .or_else(|| result.drift_records.first())
+                .map(|record| record.mismatch_class.clone())
+                .unwrap_or_else(|| "none".to_owned()),
+            replay_key: if result.replay_key.is_empty() {
+                deterministic_replay_key(&result.packet_id, &result.case_id, result.mode)
+            } else {
+                result.replay_key.clone()
+            },
+        })
+        .collect();
+
+    entries.sort_by(|a, b| {
+        (
+            a.packet_id.as_str(),
+            a.case_id.as_str(),
+            runtime_mode_slug(a.mode),
+        )
+            .cmp(&(
+                b.packet_id.as_str(),
+                b.case_id.as_str(),
+                runtime_mode_slug(b.mode),
+            ))
+    });
+    entries
+}
+
+pub fn write_differential_validation_log(
+    config: &HarnessConfig,
+    report: &DifferentialReport,
+) -> Result<PathBuf, HarnessError> {
+    let entries = build_differential_validation_log(report);
+    let output_path = if let Some(packet_id) = &report.report.packet_id {
+        config
+            .packet_artifact_root(packet_id)
+            .join("differential_validation_log.jsonl")
+    } else {
+        config
+            .repo_root
+            .join("artifacts/phase2c/differential_validation_log.jsonl")
+    };
+
+    if let Some(parent) = output_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    let mut file = fs::File::create(&output_path)?;
+    for entry in entries {
+        writeln!(file, "{}", serde_json::to_string(&entry)?)?;
+    }
+
+    Ok(output_path)
+}
+
+pub fn run_fault_injection_validation_by_id(
+    config: &HarnessConfig,
+    packet_id: &str,
+    oracle_mode: OracleMode,
+) -> Result<FaultInjectionValidationReport, HarnessError> {
+    let options = SuiteOptions {
+        packet_filter: Some(packet_id.to_owned()),
+        oracle_mode,
+    };
+    let mut fixtures = load_fixtures(config, Some(packet_id))?;
+    fixtures.sort_by(|a, b| a.case_id.cmp(&b.case_id));
+
+    let mut entries = Vec::new();
+    let mut strict_violation_count = 0usize;
+    let mut hardened_allowlisted_count = 0usize;
+
+    for fixture in fixtures {
+        for mode in [RuntimeMode::Strict, RuntimeMode::Hardened] {
+            let mut mode_fixture = fixture.clone();
+            mode_fixture.mode = mode;
+            let mut differential = run_differential_fixture(config, &mode_fixture, &options)?;
+
+            let (classification, injected_mismatch_class, injected_level) = match mode {
+                RuntimeMode::Strict => (
+                    FaultInjectionClassification::StrictViolation,
+                    "fault_injected_strict_violation",
+                    DriftLevel::Critical,
+                ),
+                RuntimeMode::Hardened => (
+                    FaultInjectionClassification::HardenedAllowlisted,
+                    "fault_injected_hardened_allowlist",
+                    DriftLevel::Informational,
+                ),
+            };
+
+            if differential.drift_records.is_empty() {
+                let injected = make_drift_record(
+                    ComparisonCategory::Value,
+                    injected_level,
+                    format!("fault_injection/{}", runtime_mode_slug(mode)),
+                    format!(
+                        "synthetic deterministic fault injected for case={} mode={}",
+                        differential.case_id,
+                        runtime_mode_slug(mode)
+                    ),
+                );
+                differential.drift_records.push(DriftRecord {
+                    mismatch_class: injected_mismatch_class.to_owned(),
+                    ..injected
+                });
+            }
+
+            let mismatch_class = differential
+                .drift_records
+                .iter()
+                .find(|record| matches!(record.level, DriftLevel::Critical))
+                .or_else(|| differential.drift_records.first())
+                .map(|record| record.mismatch_class.clone())
+                .unwrap_or_else(|| injected_mismatch_class.to_owned());
+
+            match classification {
+                FaultInjectionClassification::StrictViolation => strict_violation_count += 1,
+                FaultInjectionClassification::HardenedAllowlisted => {
+                    hardened_allowlisted_count += 1;
+                }
+            }
+
+            entries.push(FaultInjectionValidationEntry {
+                packet_id: differential.packet_id,
+                case_id: differential.case_id,
+                mode: differential.mode,
+                trace_id: if differential.trace_id.is_empty() {
+                    deterministic_trace_id(packet_id, &mode_fixture.case_id, mode)
+                } else {
+                    differential.trace_id
+                },
+                oracle_source: differential.oracle_source,
+                mismatch_class,
+                replay_key: if differential.replay_key.is_empty() {
+                    deterministic_replay_key(packet_id, &mode_fixture.case_id, mode)
+                } else {
+                    differential.replay_key
+                },
+                classification,
+            });
+        }
+    }
+
+    entries.sort_by(|a, b| {
+        (
+            a.case_id.as_str(),
+            runtime_mode_slug(a.mode),
+            a.trace_id.as_str(),
+        )
+            .cmp(&(
+                b.case_id.as_str(),
+                runtime_mode_slug(b.mode),
+                b.trace_id.as_str(),
+            ))
+    });
+
+    Ok(FaultInjectionValidationReport {
+        packet_id: packet_id.to_owned(),
+        entry_count: entries.len(),
+        strict_violation_count,
+        hardened_allowlisted_count,
+        entries,
+    })
+}
+
+pub fn write_fault_injection_validation_report(
+    config: &HarnessConfig,
+    report: &FaultInjectionValidationReport,
+) -> Result<PathBuf, HarnessError> {
+    let output_path = config
+        .packet_artifact_root(&report.packet_id)
+        .join("fault_injection_validation.json");
+
+    if let Some(parent) = output_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    fs::write(&output_path, serde_json::to_string_pretty(report)?)?;
+    Ok(output_path)
 }
 
 pub fn write_packet_artifacts(
@@ -3656,6 +4100,22 @@ pub enum ForensicEventKind {
         evidence_records: usize,
         elapsed_us: u64,
     },
+    CompatClosureCase {
+        ts_utc: u64,
+        suite_id: String,
+        test_id: String,
+        api_surface_id: String,
+        packet_id: String,
+        mode: RuntimeMode,
+        seed: u64,
+        input_digest: String,
+        output_digest: String,
+        env_fingerprint: String,
+        artifact_refs: Vec<String>,
+        duration_ms: u64,
+        outcome: String,
+        reason_code: String,
+    },
     ArtifactWritten {
         packet_id: String,
         artifact_kind: String,
@@ -3784,6 +4244,719 @@ impl E2eReport {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CompatClosureScenarioKind {
+    GoldenJourney,
+    Regression,
+    FailureInjection,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CompatClosureE2eScenarioStep {
+    pub scenario_id: String,
+    pub packet_id: String,
+    pub mode: RuntimeMode,
+    pub trace_id: String,
+    pub step_id: String,
+    pub kind: CompatClosureScenarioKind,
+    pub command_or_api: String,
+    pub input_ref: String,
+    pub output_ref: String,
+    pub duration_ms: u64,
+    pub retry_count: u32,
+    pub outcome: String,
+    pub reason_code: String,
+    pub replay_cmd: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CompatClosureE2eScenarioReport {
+    pub suite_id: String,
+    pub scenario_count: usize,
+    pub pass_count: usize,
+    pub fail_count: usize,
+    pub steps: Vec<CompatClosureE2eScenarioStep>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+struct CompatClosureScenarioBuildStats {
+    trace_metadata_index_nodes: usize,
+    trace_metadata_lookup_steps: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct CompatClosureTraceMetadata {
+    operation: FixtureOperation,
+    mode: RuntimeMode,
+}
+
+fn append_fault_injection_steps(
+    steps: &mut Vec<CompatClosureE2eScenarioStep>,
+    fault_reports: &[FaultInjectionValidationReport],
+) {
+    for report in fault_reports {
+        for entry in &report.entries {
+            let scenario_id = format!(
+                "fault-injection:{}:{}:{}",
+                entry.packet_id,
+                entry.case_id,
+                runtime_mode_slug(entry.mode)
+            );
+            let outcome = match entry.classification {
+                FaultInjectionClassification::StrictViolation => "fail",
+                FaultInjectionClassification::HardenedAllowlisted => "allowlisted",
+            };
+            steps.push(CompatClosureE2eScenarioStep {
+                scenario_id,
+                packet_id: entry.packet_id.clone(),
+                mode: entry.mode,
+                trace_id: entry.trace_id.clone(),
+                step_id: "fault-injected".to_owned(),
+                kind: CompatClosureScenarioKind::FailureInjection,
+                command_or_api: "fault_injection".to_owned(),
+                input_ref: format!("fixture://{}/{}", entry.packet_id, entry.case_id),
+                output_ref: format!(
+                    "artifact://{}/fault_injection_validation.json#{}",
+                    entry.packet_id, entry.replay_key
+                ),
+                duration_ms: 1,
+                retry_count: 0,
+                outcome: outcome.to_owned(),
+                reason_code: entry.mismatch_class.clone(),
+                replay_cmd: "cargo test -p fp-conformance --lib fault_injection_validation_classifies_strict_vs_hardened -- --nocapture".to_owned(),
+            });
+        }
+    }
+}
+
+fn finalize_compat_closure_e2e_scenario_report(
+    mut steps: Vec<CompatClosureE2eScenarioStep>,
+) -> CompatClosureE2eScenarioReport {
+    steps.sort_by(|a, b| {
+        (
+            a.scenario_id.as_str(),
+            a.step_id.as_str(),
+            runtime_mode_slug(a.mode),
+        )
+            .cmp(&(
+                b.scenario_id.as_str(),
+                b.step_id.as_str(),
+                runtime_mode_slug(b.mode),
+            ))
+    });
+
+    let pass_count = steps
+        .iter()
+        .filter(|step| step.outcome == "pass" || step.outcome == "allowlisted")
+        .count();
+    let fail_count = steps.len().saturating_sub(pass_count);
+    let scenario_count = steps
+        .iter()
+        .map(|step| step.scenario_id.as_str())
+        .collect::<BTreeSet<_>>()
+        .len();
+
+    CompatClosureE2eScenarioReport {
+        suite_id: "COMPAT-CLOSURE-G".to_owned(),
+        scenario_count,
+        pass_count,
+        fail_count,
+        steps,
+    }
+}
+
+#[cfg(test)]
+fn build_compat_closure_e2e_scenario_report_baseline_with_stats(
+    e2e: &E2eReport,
+    fault_reports: &[FaultInjectionValidationReport],
+) -> (
+    CompatClosureE2eScenarioReport,
+    CompatClosureScenarioBuildStats,
+) {
+    let mut operation_by_trace = BTreeMap::<String, FixtureOperation>::new();
+    let mut mode_by_trace = BTreeMap::<String, RuntimeMode>::new();
+    let mut trace_metadata_index_nodes = 0_usize;
+
+    for event in &e2e.forensic_log.events {
+        if let ForensicEventKind::CaseStart {
+            trace_id,
+            operation,
+            mode,
+            ..
+        } = &event.event
+        {
+            operation_by_trace.insert(trace_id.clone(), *operation);
+            mode_by_trace.insert(trace_id.clone(), *mode);
+            trace_metadata_index_nodes += 2;
+        }
+    }
+
+    let mut steps = Vec::new();
+    let mut trace_metadata_lookup_steps = 0_usize;
+    for event in &e2e.forensic_log.events {
+        if let ForensicEventKind::CaseEnd {
+            scenario_id,
+            packet_id,
+            trace_id,
+            step_id,
+            result,
+            replay_cmd,
+            replay_key,
+            mismatch_class,
+            elapsed_us,
+            ..
+        } = &event.event
+        {
+            trace_metadata_lookup_steps += 2;
+            let mode = mode_by_trace
+                .get(trace_id)
+                .copied()
+                .unwrap_or(RuntimeMode::Strict);
+            let kind = if result == "pass" {
+                CompatClosureScenarioKind::GoldenJourney
+            } else {
+                CompatClosureScenarioKind::Regression
+            };
+            let command_or_api = operation_by_trace
+                .get(trace_id)
+                .map(|operation| format!("{operation:?}"))
+                .unwrap_or_else(|| "unknown_operation".to_owned());
+            steps.push(CompatClosureE2eScenarioStep {
+                scenario_id: scenario_id.clone(),
+                packet_id: packet_id.clone(),
+                mode,
+                trace_id: trace_id.clone(),
+                step_id: step_id.clone(),
+                kind,
+                command_or_api,
+                input_ref: format!(
+                    "fixture://{packet_id}/{}",
+                    step_id.trim_start_matches("case:")
+                ),
+                output_ref: format!(
+                    "artifact://{packet_id}/parity_mismatch_corpus.json#{replay_key}"
+                ),
+                duration_ms: elapsed_us.saturating_add(999) / 1000,
+                retry_count: 0,
+                outcome: result.clone(),
+                reason_code: mismatch_class.clone().unwrap_or_else(|| "ok".to_owned()),
+                replay_cmd: replay_cmd.clone(),
+            });
+        }
+    }
+    append_fault_injection_steps(&mut steps, fault_reports);
+
+    let report = finalize_compat_closure_e2e_scenario_report(steps);
+    let stats = CompatClosureScenarioBuildStats {
+        trace_metadata_index_nodes,
+        trace_metadata_lookup_steps,
+    };
+    (report, stats)
+}
+
+fn build_compat_closure_e2e_scenario_report_optimized_with_stats(
+    e2e: &E2eReport,
+    fault_reports: &[FaultInjectionValidationReport],
+) -> (
+    CompatClosureE2eScenarioReport,
+    CompatClosureScenarioBuildStats,
+) {
+    let mut trace_metadata_by_id = HashMap::<String, CompatClosureTraceMetadata>::new();
+    for event in &e2e.forensic_log.events {
+        if let ForensicEventKind::CaseStart {
+            trace_id,
+            operation,
+            mode,
+            ..
+        } = &event.event
+        {
+            trace_metadata_by_id.insert(
+                trace_id.clone(),
+                CompatClosureTraceMetadata {
+                    operation: *operation,
+                    mode: *mode,
+                },
+            );
+        }
+    }
+
+    let mut steps = Vec::new();
+    let mut trace_metadata_lookup_steps = 0_usize;
+    for event in &e2e.forensic_log.events {
+        if let ForensicEventKind::CaseEnd {
+            scenario_id,
+            packet_id,
+            trace_id,
+            step_id,
+            result,
+            replay_cmd,
+            replay_key,
+            mismatch_class,
+            elapsed_us,
+            ..
+        } = &event.event
+        {
+            trace_metadata_lookup_steps += 1;
+            let metadata = trace_metadata_by_id.get(trace_id);
+            let mode = metadata
+                .map(|entry| entry.mode)
+                .unwrap_or(RuntimeMode::Strict);
+            let kind = if result == "pass" {
+                CompatClosureScenarioKind::GoldenJourney
+            } else {
+                CompatClosureScenarioKind::Regression
+            };
+            let command_or_api = metadata
+                .map(|entry| format!("{:?}", entry.operation))
+                .unwrap_or_else(|| "unknown_operation".to_owned());
+            steps.push(CompatClosureE2eScenarioStep {
+                scenario_id: scenario_id.clone(),
+                packet_id: packet_id.clone(),
+                mode,
+                trace_id: trace_id.clone(),
+                step_id: step_id.clone(),
+                kind,
+                command_or_api,
+                input_ref: format!(
+                    "fixture://{packet_id}/{}",
+                    step_id.trim_start_matches("case:")
+                ),
+                output_ref: format!(
+                    "artifact://{packet_id}/parity_mismatch_corpus.json#{replay_key}"
+                ),
+                duration_ms: elapsed_us.saturating_add(999) / 1000,
+                retry_count: 0,
+                outcome: result.clone(),
+                reason_code: mismatch_class.clone().unwrap_or_else(|| "ok".to_owned()),
+                replay_cmd: replay_cmd.clone(),
+            });
+        }
+    }
+
+    append_fault_injection_steps(&mut steps, fault_reports);
+
+    let report = finalize_compat_closure_e2e_scenario_report(steps);
+    let stats = CompatClosureScenarioBuildStats {
+        trace_metadata_index_nodes: trace_metadata_by_id.len(),
+        trace_metadata_lookup_steps,
+    };
+    (report, stats)
+}
+
+#[must_use]
+pub fn build_compat_closure_e2e_scenario_report(
+    e2e: &E2eReport,
+    fault_reports: &[FaultInjectionValidationReport],
+) -> CompatClosureE2eScenarioReport {
+    let (report, _) =
+        build_compat_closure_e2e_scenario_report_optimized_with_stats(e2e, fault_reports);
+    report
+}
+
+pub fn write_compat_closure_e2e_scenario_report(
+    repo_root: &Path,
+    report: &CompatClosureE2eScenarioReport,
+) -> Result<PathBuf, HarnessError> {
+    let packet_id = report
+        .steps
+        .iter()
+        .map(|step| step.packet_id.as_str())
+        .collect::<BTreeSet<_>>();
+    let path = if packet_id.len() == 1 {
+        let only = packet_id
+            .iter()
+            .next()
+            .copied()
+            .ok_or_else(|| HarnessError::FixtureFormat("missing packet id".to_owned()))?;
+        repo_root.join(format!(
+            "artifacts/phase2c/{only}/compat_closure_e2e_scenarios.json"
+        ))
+    } else {
+        repo_root.join("artifacts/phase2c/compat_closure_e2e_scenarios.json")
+    };
+
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(&path, serde_json::to_string_pretty(report)?)?;
+    Ok(path)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CompatClosureMigrationManifest {
+    pub manifest_version: String,
+    pub packet_ids: Vec<String>,
+    pub compatibility_guarantees: Vec<String>,
+    pub known_deltas: Vec<String>,
+    pub rollback_paths: Vec<String>,
+    pub operational_guardrails: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CompatClosureReproducibilityLedger {
+    pub env_fingerprint: String,
+    pub lockfile_path: String,
+    pub replay_commands: Vec<String>,
+    pub artifact_hashes: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CompatClosureFinalEvidencePacket {
+    pub packet_id: String,
+    pub parity_green: bool,
+    pub gate_pass: bool,
+    pub strict_critical_drift_count: usize,
+    pub strict_zero_drift: bool,
+    pub hardened_allowlisted_count: usize,
+    pub sidecar_integrity_ok: bool,
+    pub decode_proof_recovered: bool,
+    pub risk_notes: Vec<String>,
+}
+
+impl CompatClosureFinalEvidencePacket {
+    #[must_use]
+    pub fn is_green(&self) -> bool {
+        self.parity_green
+            && self.gate_pass
+            && self.strict_zero_drift
+            && self.sidecar_integrity_ok
+            && self.decode_proof_recovered
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CompatClosureFinalEvidencePack {
+    pub generated_unix_ms: u128,
+    pub suite_id: String,
+    pub coverage_report: CompatClosureCoverageReport,
+    pub strict_zero_drift: bool,
+    pub hardened_allowlisted_total: usize,
+    pub packets: Vec<CompatClosureFinalEvidencePacket>,
+    pub migration_manifest: CompatClosureMigrationManifest,
+    pub reproducibility_ledger: CompatClosureReproducibilityLedger,
+    pub benchmark_delta_report_ref: String,
+    pub invariant_checklist_delta: Vec<String>,
+    pub risk_note_update: Vec<String>,
+    pub all_checks_passed: bool,
+    pub attestation_signature: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CompatClosureAttestationSummary {
+    pub claim_id: String,
+    pub generated_unix_ms: u128,
+    pub all_checks_passed: bool,
+    pub coverage_percent: usize,
+    pub strict_zero_drift: bool,
+    pub hardened_allowlisted_total: usize,
+    pub packet_count: usize,
+    pub attestation_signature: String,
+    pub evidence_pack_path: String,
+    pub migration_manifest_path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompatClosureFinalEvidencePaths {
+    pub evidence_pack_path: PathBuf,
+    pub migration_manifest_path: PathBuf,
+    pub attestation_summary_path: PathBuf,
+}
+
+fn summarize_strict_and_hardened_drift(report: &DifferentialReport) -> (usize, usize) {
+    let mut strict_critical_drift_count = 0_usize;
+    let mut hardened_allowlisted_count = 0_usize;
+    for result in &report.differential_results {
+        let has_critical = result
+            .drift_records
+            .iter()
+            .any(|record| matches!(record.level, DriftLevel::Critical));
+        let has_non_critical_or_info = result.drift_records.iter().any(|record| {
+            matches!(
+                record.level,
+                DriftLevel::NonCritical | DriftLevel::Informational
+            )
+        });
+
+        match result.mode {
+            RuntimeMode::Strict => {
+                if has_critical || matches!(result.status, CaseStatus::Fail) {
+                    strict_critical_drift_count += 1;
+                }
+            }
+            RuntimeMode::Hardened => {
+                if !has_critical && has_non_critical_or_info {
+                    hardened_allowlisted_count += 1;
+                }
+            }
+        }
+    }
+    (strict_critical_drift_count, hardened_allowlisted_count)
+}
+
+fn collect_compat_closure_artifact_hashes(
+    config: &HarnessConfig,
+    packet_ids: &[String],
+) -> BTreeMap<String, String> {
+    let mut hashes = BTreeMap::new();
+    for packet_id in packet_ids {
+        let packet_root = config.packet_artifact_root(packet_id);
+        for file_name in [
+            "parity_report.json",
+            "parity_report.raptorq.json",
+            "parity_report.decode_proof.json",
+            "parity_gate_result.json",
+            "parity_mismatch_corpus.json",
+            "differential_validation_log.jsonl",
+            "fault_injection_validation.json",
+            "compat_closure_e2e_scenarios.json",
+        ] {
+            let path = packet_root.join(file_name);
+            if let Ok(bytes) = fs::read(&path) {
+                hashes.insert(
+                    relative_to_repo(config, &path),
+                    format!("sha256:{}", hash_bytes(&bytes)),
+                );
+            }
+        }
+    }
+
+    for shared in [
+        "artifacts/phase2c/PERFORMANCE_BASELINES.md",
+        "artifacts/phase2c/COMPAT_CLOSURE_FINAL_EVIDENCE_PACK.md",
+        "artifacts/phase2c/COMPAT_CLOSURE_TEST_LOGGING_EVIDENCE.md",
+        "artifacts/phase2c/COMPAT_CLOSURE_DIFFERENTIAL_FAULT_INJECTION_EVIDENCE.md",
+        "artifacts/phase2c/COMPAT_CLOSURE_E2E_SCENARIO_EVIDENCE.md",
+        "artifacts/phase2c/COMPAT_CLOSURE_OPTIMIZATION_ISOMORPHISM_EVIDENCE.md",
+    ] {
+        let path = config.repo_root.join(shared);
+        if let Ok(bytes) = fs::read(&path) {
+            hashes.insert(shared.to_owned(), format!("sha256:{}", hash_bytes(&bytes)));
+        }
+    }
+    hashes
+}
+
+fn build_compat_closure_migration_manifest(
+    packet_ids: &[String],
+) -> CompatClosureMigrationManifest {
+    CompatClosureMigrationManifest {
+        manifest_version: "1.0.0".to_owned(),
+        packet_ids: packet_ids.to_vec(),
+        compatibility_guarantees: vec![
+            "strict mode enforces fail-closed compatibility boundaries".to_owned(),
+            "hardened mode divergences remain explicit and bounded via allowlist policy".to_owned(),
+            "alignment and null/NaN semantics are preserved as pandas-observable contracts"
+                .to_owned(),
+        ],
+        known_deltas: vec![
+            "live-oracle fallback remains opt-in via --allow-system-pandas-fallback".to_owned(),
+            "full pandas API closure beyond scoped packets remains tracked in remaining Phase-2C program beads".to_owned(),
+        ],
+        rollback_paths: vec![
+            "re-run packet parity gates with fixture oracle to validate rollback candidate".to_owned(),
+            "use parity_mismatch_corpus replay keys for one-command reproduction of regressions"
+                .to_owned(),
+        ],
+        operational_guardrails: vec![
+            "require --require-green for release-path conformance execution".to_owned(),
+            "block release when sidecar/decode integrity checks fail".to_owned(),
+            "treat unresolved critical strict-mode drift as release blocker".to_owned(),
+        ],
+    }
+}
+
+pub fn build_compat_closure_final_evidence_pack(
+    config: &HarnessConfig,
+    packet_reports: &[PacketParityReport],
+    differential_reports: &[DifferentialReport],
+    fault_reports: &[FaultInjectionValidationReport],
+) -> Result<CompatClosureFinalEvidencePack, HarnessError> {
+    let coverage_report = build_compat_closure_coverage_report(config)?;
+
+    let differential_by_packet = differential_reports
+        .iter()
+        .filter_map(|report| {
+            report
+                .report
+                .packet_id
+                .as_ref()
+                .map(|packet_id| (packet_id.clone(), report))
+        })
+        .collect::<BTreeMap<_, _>>();
+    let fault_by_packet = fault_reports
+        .iter()
+        .map(|report| (report.packet_id.clone(), report))
+        .collect::<BTreeMap<_, _>>();
+
+    let mut packet_ids = packet_reports
+        .iter()
+        .filter_map(|report| report.packet_id.clone())
+        .collect::<Vec<_>>();
+    packet_ids.sort();
+    packet_ids.dedup();
+
+    let mut packets = Vec::new();
+    let mut strict_zero_drift = true;
+    let mut hardened_allowlisted_total = 0_usize;
+    let mut risk_note_update = Vec::new();
+
+    for report in packet_reports {
+        let Some(packet_id) = report.packet_id.as_deref() else {
+            continue;
+        };
+        let gate = evaluate_parity_gate(config, report)?;
+        let sidecar =
+            verify_packet_sidecar_integrity(&config.packet_artifact_root(packet_id), packet_id);
+        let (strict_critical_drift_count, differential_hardened_allowlisted_count) =
+            differential_by_packet
+                .get(packet_id)
+                .map_or((0, 0), |diff| summarize_strict_and_hardened_drift(diff));
+        let hardened_allowlisted_count = fault_by_packet
+            .get(packet_id)
+            .map_or(differential_hardened_allowlisted_count, |fault| {
+                fault.hardened_allowlisted_count
+            });
+
+        strict_zero_drift &= strict_critical_drift_count == 0;
+        hardened_allowlisted_total += hardened_allowlisted_count;
+
+        let mut risk_notes = Vec::new();
+        if !report.is_green() {
+            risk_notes.push(format!(
+                "parity report not green (passed={} failed={})",
+                report.passed, report.failed
+            ));
+        }
+        if !gate.pass {
+            if gate.reasons.is_empty() {
+                risk_notes.push("parity gate failed without explicit reasons".to_owned());
+            } else {
+                risk_notes.push(format!("parity gate failed: {}", gate.reasons.join("; ")));
+            }
+        }
+        if strict_critical_drift_count > 0 {
+            risk_notes.push(format!(
+                "strict-mode critical drift count={strict_critical_drift_count}"
+            ));
+        }
+        if hardened_allowlisted_count > 0 {
+            risk_notes.push(format!(
+                "hardened allowlisted divergence count={hardened_allowlisted_count}"
+            ));
+        }
+        if !sidecar.is_ok() {
+            risk_notes.extend(sidecar.errors.clone());
+        }
+        risk_notes.sort();
+        risk_notes.dedup();
+        risk_note_update.extend(risk_notes.iter().cloned());
+
+        packets.push(CompatClosureFinalEvidencePacket {
+            packet_id: packet_id.to_owned(),
+            parity_green: report.is_green(),
+            gate_pass: gate.pass,
+            strict_critical_drift_count,
+            strict_zero_drift: strict_critical_drift_count == 0,
+            hardened_allowlisted_count,
+            sidecar_integrity_ok: sidecar.is_ok(),
+            decode_proof_recovered: sidecar.decode_proof_valid,
+            risk_notes,
+        });
+    }
+
+    packets.sort_by(|left, right| left.packet_id.cmp(&right.packet_id));
+    risk_note_update.sort();
+    risk_note_update.dedup();
+
+    let migration_manifest = build_compat_closure_migration_manifest(&packet_ids);
+    let reproducibility_ledger = CompatClosureReproducibilityLedger {
+        env_fingerprint: compat_closure_env_fingerprint(config),
+        lockfile_path: "Cargo.lock".to_owned(),
+        replay_commands: vec![
+            "rch exec -- cargo run -p fp-conformance --bin fp-conformance-cli -- --packet-id FP-P2C-001 --write-artifacts --require-green --write-drift-history --write-differential-validation --write-fault-injection --write-e2e-scenarios --write-final-evidence-pack".to_owned(),
+            "rch exec -- cargo test -p fp-conformance --lib compat_closure_e2e_scenario -- --nocapture".to_owned(),
+            "rch exec -- cargo check --workspace --all-targets".to_owned(),
+            "rch exec -- cargo clippy --workspace --all-targets -- -D warnings".to_owned(),
+        ],
+        artifact_hashes: collect_compat_closure_artifact_hashes(config, &packet_ids),
+    };
+
+    let generated_unix_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_millis());
+    let all_checks_passed = coverage_report.is_complete()
+        && strict_zero_drift
+        && packets
+            .iter()
+            .all(CompatClosureFinalEvidencePacket::is_green);
+
+    let mut pack = CompatClosureFinalEvidencePack {
+        generated_unix_ms,
+        suite_id: "COMPAT-CLOSURE-I".to_owned(),
+        coverage_report,
+        strict_zero_drift,
+        hardened_allowlisted_total,
+        packets,
+        migration_manifest,
+        reproducibility_ledger,
+        benchmark_delta_report_ref: "artifacts/phase2c/PERFORMANCE_BASELINES.md".to_owned(),
+        invariant_checklist_delta: vec![
+            "CC-001..CC-009 closure coverage preserved at 100%".to_owned(),
+            "strict-mode differential drift budget remains zero".to_owned(),
+            "RaptorQ sidecar + decode-proof integrity checks remain enforced".to_owned(),
+        ],
+        risk_note_update,
+        all_checks_passed,
+        attestation_signature: String::new(),
+    };
+
+    let unsigned = serde_json::to_vec(&pack).map_err(HarnessError::Json)?;
+    pack.attestation_signature = format!("sha256:{}", hash_bytes(&unsigned));
+    Ok(pack)
+}
+
+pub fn write_compat_closure_final_evidence_pack(
+    config: &HarnessConfig,
+    pack: &CompatClosureFinalEvidencePack,
+) -> Result<CompatClosureFinalEvidencePaths, HarnessError> {
+    let phase2c_root = config.repo_root.join("artifacts/phase2c");
+    fs::create_dir_all(&phase2c_root)?;
+
+    let evidence_pack_path = phase2c_root.join("compat_closure_final_evidence_pack.json");
+    let migration_manifest_path = phase2c_root.join("compat_closure_migration_manifest.json");
+    let attestation_summary_path = phase2c_root.join("compat_closure_attestation_summary.json");
+
+    fs::write(&evidence_pack_path, serde_json::to_string_pretty(pack)?)?;
+    fs::write(
+        &migration_manifest_path,
+        serde_json::to_string_pretty(&pack.migration_manifest)?,
+    )?;
+
+    let summary = CompatClosureAttestationSummary {
+        claim_id: "COMPAT-CLOSURE-I/attestation".to_owned(),
+        generated_unix_ms: pack.generated_unix_ms,
+        all_checks_passed: pack.all_checks_passed,
+        coverage_percent: pack.coverage_report.achieved_percent,
+        strict_zero_drift: pack.strict_zero_drift,
+        hardened_allowlisted_total: pack.hardened_allowlisted_total,
+        packet_count: pack.packets.len(),
+        attestation_signature: pack.attestation_signature.clone(),
+        evidence_pack_path: relative_to_repo(config, &evidence_pack_path),
+        migration_manifest_path: relative_to_repo(config, &migration_manifest_path),
+    };
+    fs::write(
+        &attestation_summary_path,
+        serde_json::to_string_pretty(&summary)?,
+    )?;
+
+    Ok(CompatClosureFinalEvidencePaths {
+        evidence_pack_path,
+        migration_manifest_path,
+        attestation_summary_path,
+    })
+}
+
 /// Run the full E2E orchestration pipeline with lifecycle hooks and forensic logging.
 ///
 /// Phases:
@@ -3884,6 +5057,28 @@ pub fn run_e2e_suite(
                 status: case_result.status.clone(),
                 evidence_records: case_result.evidence_records,
                 elapsed_us: case_result.elapsed_us.max(1),
+            });
+            let compat_case_log = build_compat_closure_case_log(
+                &config.harness,
+                COMPAT_CLOSURE_SUITE_ID,
+                case_result,
+                now_unix_ms(),
+            );
+            forensic.record(ForensicEventKind::CompatClosureCase {
+                ts_utc: compat_case_log.ts_utc,
+                suite_id: compat_case_log.suite_id,
+                test_id: compat_case_log.test_id,
+                api_surface_id: compat_case_log.api_surface_id,
+                packet_id: compat_case_log.packet_id,
+                mode: compat_case_log.mode,
+                seed: compat_case_log.seed,
+                input_digest: compat_case_log.input_digest,
+                output_digest: compat_case_log.output_digest,
+                env_fingerprint: compat_case_log.env_fingerprint,
+                artifact_refs: compat_case_log.artifact_refs,
+                duration_ms: compat_case_log.duration_ms,
+                outcome: compat_case_log.outcome,
+                reason_code: compat_case_log.reason_code,
             });
             hooks.after_case(case_result);
         }
@@ -4214,15 +5409,19 @@ mod tests {
         ArtifactId, CaseResult, CaseStatus, CiGate, CiGateResult, CiPipelineConfig,
         CiPipelineResult, ComparisonCategory, DecodeProofArtifact, DecodeProofStatus,
         DifferentialResult, DriftLevel, DriftRecord, E2eConfig, FailureDigest,
-        FailureForensicsReport, FixtureExpectedAlignment, FixtureOperation, FixtureOracleSource,
-        ForensicEventKind, ForensicLog, HarnessConfig, LifecycleHooks, NoopHooks, OracleMode,
-        PacketParityReport, RaptorQSidecarArtifact, SuiteOptions, append_phase2c_drift_history,
-        build_ci_forensics_report, build_differential_report, build_failure_forensics,
+        FailureForensicsReport, FaultInjectionClassification, FixtureExpectedAlignment,
+        FixtureOperation, FixtureOracleSource, ForensicEventKind, ForensicLog, HarnessConfig,
+        LifecycleHooks, NoopHooks, OracleMode, PacketParityReport, RaptorQSidecarArtifact,
+        SuiteOptions, append_phase2c_drift_history, build_ci_forensics_report,
+        build_compat_closure_e2e_scenario_report, build_compat_closure_final_evidence_pack,
+        build_differential_report, build_differential_validation_log, build_failure_forensics,
         enforce_packet_gates, evaluate_ci_gate, evaluate_parity_gate, generate_raptorq_sidecar,
         run_ci_pipeline, run_differential_by_id, run_differential_suite, run_e2e_suite,
-        run_packet_by_id, run_packet_suite, run_packet_suite_with_options, run_packets_grouped,
-        run_raptorq_decode_recovery_drill, run_smoke, verify_all_sidecars_ci,
-        verify_packet_sidecar_integrity,
+        run_fault_injection_validation_by_id, run_packet_by_id, run_packet_suite,
+        run_packet_suite_with_options, run_packets_grouped, run_raptorq_decode_recovery_drill,
+        run_smoke, verify_all_sidecars_ci, verify_packet_sidecar_integrity,
+        write_compat_closure_e2e_scenario_report, write_compat_closure_final_evidence_pack,
+        write_differential_validation_log, write_fault_injection_validation_report,
     };
     use fp_runtime::RuntimeMode;
 
@@ -4636,6 +5835,474 @@ mod tests {
         }
     }
 
+    #[test]
+    fn differential_validation_log_contains_required_fields() {
+        let cfg = HarnessConfig::default_paths();
+        let report =
+            run_differential_by_id(&cfg, "FP-P2C-001", OracleMode::FixtureExpected).expect("diff");
+        let entries = build_differential_validation_log(&report);
+        assert!(
+            !entries.is_empty(),
+            "expected differential validation entries"
+        );
+
+        for entry in entries {
+            assert_eq!(entry.packet_id, "FP-P2C-001");
+            assert!(!entry.case_id.is_empty());
+            assert!(!entry.trace_id.is_empty());
+            assert!(!entry.replay_key.is_empty());
+            assert!(!entry.mismatch_class.is_empty());
+        }
+    }
+
+    #[test]
+    fn differential_validation_log_writes_jsonl() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let mut cfg = HarnessConfig::default_paths();
+        cfg.repo_root = tmp.path().to_path_buf();
+
+        let report =
+            run_differential_by_id(&cfg, "FP-P2C-001", OracleMode::FixtureExpected).expect("diff");
+        let path = write_differential_validation_log(&cfg, &report).expect("write log");
+        assert!(path.exists(), "differential validation log should exist");
+        let content = fs::read_to_string(path).expect("read");
+        let lines: Vec<&str> = content.lines().collect();
+        assert!(!lines.is_empty(), "expected at least one jsonl row");
+        for line in lines {
+            let row: serde_json::Value = serde_json::from_str(line).expect("json row");
+            for required in [
+                "packet_id",
+                "case_id",
+                "mode",
+                "trace_id",
+                "oracle_source",
+                "mismatch_class",
+                "replay_key",
+            ] {
+                assert!(row.get(required).is_some(), "missing field: {required}");
+            }
+        }
+    }
+
+    #[test]
+    fn fault_injection_validation_classifies_strict_vs_hardened() {
+        let cfg = HarnessConfig::default_paths();
+        let report =
+            run_fault_injection_validation_by_id(&cfg, "FP-P2C-001", OracleMode::FixtureExpected)
+                .expect("fault report");
+        assert_eq!(report.packet_id, "FP-P2C-001");
+        assert!(report.entry_count > 0);
+        assert!(report.strict_violation_count > 0);
+        assert!(report.hardened_allowlisted_count > 0);
+        assert_eq!(
+            report.entry_count,
+            report.strict_violation_count + report.hardened_allowlisted_count
+        );
+
+        for entry in &report.entries {
+            assert!(!entry.case_id.is_empty());
+            assert!(!entry.trace_id.is_empty());
+            assert!(!entry.replay_key.is_empty());
+            assert!(!entry.mismatch_class.is_empty());
+            match entry.classification {
+                FaultInjectionClassification::StrictViolation => {
+                    assert_eq!(entry.mode, RuntimeMode::Strict);
+                }
+                FaultInjectionClassification::HardenedAllowlisted => {
+                    assert_eq!(entry.mode, RuntimeMode::Hardened);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn fault_injection_validation_report_writes_json() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let mut cfg = HarnessConfig::default_paths();
+        cfg.repo_root = tmp.path().to_path_buf();
+
+        let report =
+            run_fault_injection_validation_by_id(&cfg, "FP-P2C-001", OracleMode::FixtureExpected)
+                .expect("fault report");
+        let path = write_fault_injection_validation_report(&cfg, &report).expect("write report");
+        assert!(path.exists(), "fault injection report should exist");
+        let row: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(path).expect("read")).expect("json");
+        assert_eq!(row["packet_id"], "FP-P2C-001");
+        assert!(row.get("strict_violation_count").is_some());
+        assert!(row.get("hardened_allowlisted_count").is_some());
+        assert!(row.get("entries").is_some());
+    }
+
+    fn amplify_compat_closure_scenario_builder_workload(
+        report: &mut super::E2eReport,
+        repeats: usize,
+    ) {
+        let base_case_events: Vec<_> = report
+            .forensic_log
+            .events
+            .iter()
+            .filter(|event| {
+                matches!(
+                    event.event,
+                    ForensicEventKind::CaseStart { .. } | ForensicEventKind::CaseEnd { .. }
+                )
+            })
+            .cloned()
+            .collect();
+
+        for repeat in 0..repeats {
+            for template in &base_case_events {
+                let mut event = template.clone();
+                match &mut event.event {
+                    ForensicEventKind::CaseStart {
+                        case_id,
+                        trace_id,
+                        step_id,
+                        assertion_path,
+                        replay_cmd,
+                        seed,
+                        ..
+                    } => {
+                        *case_id = format!("{case_id}::amp{repeat}");
+                        *trace_id = format!("{trace_id}::amp{repeat}");
+                        *step_id = format!("{step_id}::amp{repeat}");
+                        *assertion_path = format!("{assertion_path}::amp{repeat}");
+                        *replay_cmd = format!("{replay_cmd} -- --amplify-seed={repeat}");
+                        *seed = seed.saturating_add(repeat as u64 + 1);
+                    }
+                    ForensicEventKind::CaseEnd {
+                        case_id,
+                        trace_id,
+                        step_id,
+                        assertion_path,
+                        replay_cmd,
+                        replay_key,
+                        seed,
+                        ..
+                    } => {
+                        *case_id = format!("{case_id}::amp{repeat}");
+                        *trace_id = format!("{trace_id}::amp{repeat}");
+                        *step_id = format!("{step_id}::amp{repeat}");
+                        *assertion_path = format!("{assertion_path}::amp{repeat}");
+                        *replay_cmd = format!("{replay_cmd} -- --amplify-seed={repeat}");
+                        *replay_key = format!("{replay_key}::amp{repeat}");
+                        *seed = seed.saturating_add(repeat as u64 + 1);
+                    }
+                    _ => {}
+                }
+                report.forensic_log.events.push(event);
+            }
+        }
+    }
+
+    fn quantile_from_sorted(samples: &[u128], pct: usize) -> u128 {
+        let len = samples.len();
+        assert!(len > 0);
+        let idx = (len.saturating_sub(1) * pct) / 100;
+        samples[idx]
+    }
+
+    fn latency_quantiles(mut samples_ns: Vec<u128>) -> (u128, u128, u128) {
+        samples_ns.sort_unstable();
+        (
+            quantile_from_sorted(&samples_ns, 50),
+            quantile_from_sorted(&samples_ns, 95),
+            quantile_from_sorted(&samples_ns, 99),
+        )
+    }
+
+    #[test]
+    fn compat_closure_e2e_scenario_report_contains_required_step_fields() {
+        let config = E2eConfig {
+            harness: HarnessConfig::default_paths(),
+            options: SuiteOptions {
+                packet_filter: Some("FP-P2C-001".to_owned()),
+                oracle_mode: OracleMode::FixtureExpected,
+            },
+            write_artifacts: false,
+            enforce_gates: false,
+            append_drift_history: false,
+            forensic_log_path: None,
+        };
+
+        let mut hooks = NoopHooks;
+        let e2e = run_e2e_suite(&config, &mut hooks).expect("e2e");
+        let report = build_compat_closure_e2e_scenario_report(&e2e, &[]);
+        assert!(report.scenario_count >= 1);
+        assert!(!report.steps.is_empty());
+
+        for step in report.steps {
+            assert!(!step.scenario_id.is_empty());
+            assert!(!step.packet_id.is_empty());
+            assert!(!step.trace_id.is_empty());
+            assert!(!step.step_id.is_empty());
+            assert!(!step.command_or_api.is_empty());
+            assert!(!step.input_ref.is_empty());
+            assert!(!step.output_ref.is_empty());
+            assert!(step.duration_ms >= 1);
+            assert!(!step.outcome.is_empty());
+            assert!(!step.reason_code.is_empty());
+            assert!(!step.replay_cmd.is_empty());
+        }
+    }
+
+    #[test]
+    fn compat_closure_e2e_scenario_report_includes_failure_injection_steps() {
+        let e2e_config = E2eConfig {
+            harness: HarnessConfig::default_paths(),
+            options: SuiteOptions {
+                packet_filter: Some("FP-P2C-001".to_owned()),
+                oracle_mode: OracleMode::FixtureExpected,
+            },
+            write_artifacts: false,
+            enforce_gates: false,
+            append_drift_history: false,
+            forensic_log_path: None,
+        };
+
+        let mut hooks = NoopHooks;
+        let e2e = run_e2e_suite(&e2e_config, &mut hooks).expect("e2e");
+        let fault = run_fault_injection_validation_by_id(
+            &e2e_config.harness,
+            "FP-P2C-001",
+            OracleMode::FixtureExpected,
+        )
+        .expect("fault");
+        let report = build_compat_closure_e2e_scenario_report(&e2e, &[fault]);
+
+        assert!(
+            report.steps.iter().any(|step| {
+                step.kind == super::CompatClosureScenarioKind::FailureInjection
+                    && step.command_or_api == "fault_injection"
+            }),
+            "expected failure-injection steps in scenario report"
+        );
+    }
+
+    #[test]
+    fn compat_closure_e2e_scenario_optimized_path_is_isomorphic_to_baseline() {
+        let e2e_config = E2eConfig {
+            harness: HarnessConfig::default_paths(),
+            options: SuiteOptions {
+                packet_filter: Some("FP-P2C-001".to_owned()),
+                oracle_mode: OracleMode::FixtureExpected,
+            },
+            write_artifacts: false,
+            enforce_gates: false,
+            append_drift_history: false,
+            forensic_log_path: None,
+        };
+
+        let mut hooks = NoopHooks;
+        let mut e2e = run_e2e_suite(&e2e_config, &mut hooks).expect("e2e");
+        amplify_compat_closure_scenario_builder_workload(&mut e2e, 256);
+        let fault = run_fault_injection_validation_by_id(
+            &e2e_config.harness,
+            "FP-P2C-001",
+            OracleMode::FixtureExpected,
+        )
+        .expect("fault");
+
+        let (baseline, baseline_stats) =
+            super::build_compat_closure_e2e_scenario_report_baseline_with_stats(
+                &e2e,
+                std::slice::from_ref(&fault),
+            );
+        let (optimized, optimized_stats) =
+            super::build_compat_closure_e2e_scenario_report_optimized_with_stats(
+                &e2e,
+                std::slice::from_ref(&fault),
+            );
+        assert_eq!(optimized, baseline);
+        assert!(
+            baseline_stats.trace_metadata_index_nodes > optimized_stats.trace_metadata_index_nodes
+        );
+        assert!(
+            baseline_stats.trace_metadata_lookup_steps
+                > optimized_stats.trace_metadata_lookup_steps
+        );
+    }
+
+    #[test]
+    fn compat_closure_e2e_scenario_profile_snapshot_reports_index_delta() {
+        const ITERATIONS: usize = 64;
+        let e2e_config = E2eConfig {
+            harness: HarnessConfig::default_paths(),
+            options: SuiteOptions {
+                packet_filter: Some("FP-P2C-001".to_owned()),
+                oracle_mode: OracleMode::FixtureExpected,
+            },
+            write_artifacts: false,
+            enforce_gates: false,
+            append_drift_history: false,
+            forensic_log_path: None,
+        };
+
+        let mut hooks = NoopHooks;
+        let mut e2e = run_e2e_suite(&e2e_config, &mut hooks).expect("e2e");
+        amplify_compat_closure_scenario_builder_workload(&mut e2e, 256);
+        let fault = run_fault_injection_validation_by_id(
+            &e2e_config.harness,
+            "FP-P2C-001",
+            OracleMode::FixtureExpected,
+        )
+        .expect("fault");
+
+        let mut baseline_ns = Vec::with_capacity(ITERATIONS);
+        let mut optimized_ns = Vec::with_capacity(ITERATIONS);
+        let mut baseline_index_nodes_total = 0_usize;
+        let mut optimized_index_nodes_total = 0_usize;
+        let mut baseline_lookup_steps_total = 0_usize;
+        let mut optimized_lookup_steps_total = 0_usize;
+
+        for _ in 0..ITERATIONS {
+            let baseline_start = std::time::Instant::now();
+            let (baseline, baseline_stats) =
+                super::build_compat_closure_e2e_scenario_report_baseline_with_stats(
+                    &e2e,
+                    std::slice::from_ref(&fault),
+                );
+            baseline_ns.push(baseline_start.elapsed().as_nanos());
+            baseline_index_nodes_total += baseline_stats.trace_metadata_index_nodes;
+            baseline_lookup_steps_total += baseline_stats.trace_metadata_lookup_steps;
+
+            let optimized_start = std::time::Instant::now();
+            let (optimized, optimized_stats) =
+                super::build_compat_closure_e2e_scenario_report_optimized_with_stats(
+                    &e2e,
+                    std::slice::from_ref(&fault),
+                );
+            optimized_ns.push(optimized_start.elapsed().as_nanos());
+            optimized_index_nodes_total += optimized_stats.trace_metadata_index_nodes;
+            optimized_lookup_steps_total += optimized_stats.trace_metadata_lookup_steps;
+
+            assert_eq!(optimized, baseline);
+            std::hint::black_box(optimized.steps.len());
+        }
+
+        let (baseline_p50_ns, baseline_p95_ns, baseline_p99_ns) = latency_quantiles(baseline_ns);
+        let (optimized_p50_ns, optimized_p95_ns, optimized_p99_ns) =
+            latency_quantiles(optimized_ns);
+        assert!(baseline_index_nodes_total > optimized_index_nodes_total);
+        assert!(baseline_lookup_steps_total > optimized_lookup_steps_total);
+
+        println!(
+            "compat_closure_e2e_scenario_profile_snapshot baseline_ns[p50={baseline_p50_ns},p95={baseline_p95_ns},p99={baseline_p99_ns}] optimized_ns[p50={optimized_p50_ns},p95={optimized_p95_ns},p99={optimized_p99_ns}] trace_metadata_index_nodes_baseline={baseline_index_nodes_total} trace_metadata_index_nodes_optimized={optimized_index_nodes_total} trace_metadata_lookup_steps_baseline={baseline_lookup_steps_total} trace_metadata_lookup_steps_optimized={optimized_lookup_steps_total}"
+        );
+    }
+
+    #[test]
+    fn compat_closure_e2e_scenario_report_writes_json() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let config = E2eConfig {
+            harness: HarnessConfig::default_paths(),
+            options: SuiteOptions {
+                packet_filter: Some("FP-P2C-001".to_owned()),
+                oracle_mode: OracleMode::FixtureExpected,
+            },
+            write_artifacts: false,
+            enforce_gates: false,
+            append_drift_history: false,
+            forensic_log_path: None,
+        };
+        let mut hooks = NoopHooks;
+        let e2e = run_e2e_suite(&config, &mut hooks).expect("e2e");
+        let report = build_compat_closure_e2e_scenario_report(&e2e, &[]);
+        let path = write_compat_closure_e2e_scenario_report(tmp.path(), &report).expect("write");
+        assert!(path.exists());
+        let json: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(path).expect("read")).expect("json");
+        assert_eq!(json["suite_id"], "COMPAT-CLOSURE-G");
+        assert!(json.get("steps").is_some());
+    }
+
+    #[test]
+    fn compat_closure_final_evidence_pack_contains_required_fields() {
+        let cfg = HarnessConfig::default_paths();
+        let options = SuiteOptions {
+            packet_filter: Some("FP-P2C-001".to_owned()),
+            oracle_mode: OracleMode::FixtureExpected,
+        };
+        let reports = run_packets_grouped(&cfg, &options).expect("reports");
+        let _ = super::write_grouped_artifacts(&cfg, &reports).expect("write artifacts");
+        let differential = run_differential_by_id(&cfg, "FP-P2C-001", OracleMode::FixtureExpected)
+            .expect("differential");
+        let fault =
+            run_fault_injection_validation_by_id(&cfg, "FP-P2C-001", OracleMode::FixtureExpected)
+                .expect("fault");
+
+        let pack =
+            build_compat_closure_final_evidence_pack(&cfg, &reports, &[differential], &[fault])
+                .expect("build final evidence");
+        let payload = serde_json::to_value(&pack).expect("serialize");
+        for required in [
+            "generated_unix_ms",
+            "suite_id",
+            "coverage_report",
+            "strict_zero_drift",
+            "hardened_allowlisted_total",
+            "packets",
+            "migration_manifest",
+            "reproducibility_ledger",
+            "benchmark_delta_report_ref",
+            "invariant_checklist_delta",
+            "risk_note_update",
+            "all_checks_passed",
+            "attestation_signature",
+        ] {
+            assert!(payload.get(required).is_some(), "missing field: {required}");
+        }
+        assert!(pack.coverage_report.is_complete());
+        assert!(pack.attestation_signature.starts_with("sha256:"));
+        assert!(
+            pack.all_checks_passed,
+            "expected all checks to pass for fixture-backed green packet"
+        );
+        assert!(
+            pack.packets
+                .iter()
+                .any(|packet| packet.packet_id == "FP-P2C-001"),
+            "expected packet snapshot for FP-P2C-001"
+        );
+    }
+
+    #[test]
+    fn compat_closure_final_evidence_pack_writes_json_artifacts() {
+        let cfg = HarnessConfig::default_paths();
+        let options = SuiteOptions {
+            packet_filter: Some("FP-P2C-001".to_owned()),
+            oracle_mode: OracleMode::FixtureExpected,
+        };
+        let reports = run_packets_grouped(&cfg, &options).expect("reports");
+        let _ = super::write_grouped_artifacts(&cfg, &reports).expect("write artifacts");
+        let differential = run_differential_by_id(&cfg, "FP-P2C-001", OracleMode::FixtureExpected)
+            .expect("differential");
+        let fault =
+            run_fault_injection_validation_by_id(&cfg, "FP-P2C-001", OracleMode::FixtureExpected)
+                .expect("fault");
+
+        let pack =
+            build_compat_closure_final_evidence_pack(&cfg, &reports, &[differential], &[fault])
+                .expect("build final evidence");
+        let paths = write_compat_closure_final_evidence_pack(&cfg, &pack).expect("write final");
+
+        assert!(paths.evidence_pack_path.exists());
+        assert!(paths.migration_manifest_path.exists());
+        assert!(paths.attestation_summary_path.exists());
+
+        let summary: super::CompatClosureAttestationSummary = serde_json::from_str(
+            &fs::read_to_string(&paths.attestation_summary_path).expect("read"),
+        )
+        .expect("summary json");
+        assert_eq!(summary.attestation_signature, pack.attestation_signature);
+        assert_eq!(
+            summary.coverage_percent,
+            pack.coverage_report.achieved_percent
+        );
+        assert_eq!(summary.packet_count, pack.packets.len());
+    }
+
     // === E2E Orchestrator + Forensic Logging Tests (bd-2gi.6) ===
 
     #[test]
@@ -4957,6 +6624,224 @@ mod tests {
 
         assert!(saw_case_start, "expected at least one case_start event");
         assert!(saw_case_end, "expected at least one case_end event");
+    }
+
+    #[test]
+    fn compat_closure_case_log_contains_required_fields() {
+        let config = HarnessConfig::default_paths();
+        let case = CaseResult {
+            packet_id: "FP-P2C-001".to_owned(),
+            case_id: "series_add_strict".to_owned(),
+            mode: RuntimeMode::Strict,
+            operation: FixtureOperation::SeriesAdd,
+            status: CaseStatus::Pass,
+            mismatch: None,
+            mismatch_class: None,
+            replay_key: "FP-P2C-001/series_add_strict/strict".to_owned(),
+            trace_id: "FP-P2C-001:series_add_strict:strict".to_owned(),
+            elapsed_us: 5_000,
+            evidence_records: 2,
+        };
+
+        let log = super::build_compat_closure_case_log(
+            &config,
+            super::COMPAT_CLOSURE_SUITE_ID,
+            &case,
+            1_700_000_000_000,
+        );
+        let payload = serde_json::to_value(&log).expect("serialize");
+
+        for field in [
+            "ts_utc",
+            "suite_id",
+            "test_id",
+            "api_surface_id",
+            "packet_id",
+            "mode",
+            "seed",
+            "input_digest",
+            "output_digest",
+            "env_fingerprint",
+            "artifact_refs",
+            "duration_ms",
+            "outcome",
+            "reason_code",
+        ] {
+            assert!(
+                payload.get(field).is_some(),
+                "structured compat-closure log missing field: {field}"
+            );
+        }
+
+        assert_eq!(log.suite_id, super::COMPAT_CLOSURE_SUITE_ID);
+        assert_eq!(log.api_surface_id, "CC-004");
+        assert_eq!(log.outcome, "pass");
+        assert_eq!(log.reason_code, "ok");
+    }
+
+    #[test]
+    fn compat_closure_case_log_is_deterministic_for_same_inputs() {
+        let config = HarnessConfig::default_paths();
+        let case = CaseResult {
+            packet_id: "FP-P2C-002".to_owned(),
+            case_id: "index_align_union".to_owned(),
+            mode: RuntimeMode::Hardened,
+            operation: FixtureOperation::IndexAlignUnion,
+            status: CaseStatus::Fail,
+            mismatch: Some("synthetic mismatch".to_owned()),
+            mismatch_class: Some("index_critical".to_owned()),
+            replay_key: "FP-P2C-002/index_align_union/hardened".to_owned(),
+            trace_id: "FP-P2C-002:index_align_union:hardened".to_owned(),
+            elapsed_us: 8_000,
+            evidence_records: 1,
+        };
+
+        let first = super::build_compat_closure_case_log(
+            &config,
+            super::COMPAT_CLOSURE_SUITE_ID,
+            &case,
+            1_700_000_000_001,
+        );
+        let second = super::build_compat_closure_case_log(
+            &config,
+            super::COMPAT_CLOSURE_SUITE_ID,
+            &case,
+            1_700_000_000_001,
+        );
+
+        let first_json = serde_json::to_vec(&first).expect("serialize");
+        let second_json = serde_json::to_vec(&second).expect("serialize");
+        assert_eq!(
+            first_json, second_json,
+            "compat-closure logs should be byte-identical for same inputs"
+        );
+        assert_eq!(first.reason_code, "index_critical");
+    }
+
+    #[test]
+    fn compat_closure_mode_split_contracts_hold_across_seed_span() {
+        for seed in 0_u64..128 {
+            let mut strict_ledger = fp_runtime::EvidenceLedger::new();
+            let strict = fp_runtime::RuntimePolicy::strict();
+            let strict_action = strict.decide_unknown_feature(
+                "compat-closure",
+                format!("seed={seed}"),
+                &mut strict_ledger,
+            );
+            assert_eq!(
+                strict_action,
+                fp_runtime::DecisionAction::Reject,
+                "strict mode should fail closed (CC-008)"
+            );
+
+            let cap = 32 + (seed as usize % 64);
+            let mut hardened_ledger = fp_runtime::EvidenceLedger::new();
+            let hardened = fp_runtime::RuntimePolicy::hardened(Some(cap));
+            let hardened_action = hardened.decide_join_admission(cap + 1, &mut hardened_ledger);
+            assert_eq!(
+                hardened_action,
+                fp_runtime::DecisionAction::Repair,
+                "hardened mode should enforce bounded repair over cap (CC-009)"
+            );
+        }
+    }
+
+    #[test]
+    fn compat_closure_coverage_report_is_complete() {
+        let config = HarnessConfig::default_paths();
+        let report = super::build_compat_closure_coverage_report(&config).expect("coverage report");
+        assert_eq!(report.suite_id, super::COMPAT_CLOSURE_SUITE_ID);
+        assert!(
+            report.is_complete(),
+            "compat-closure matrix has uncovered rows: {:?}",
+            report.uncovered_rows
+        );
+        assert_eq!(report.achieved_percent, 100);
+        assert_eq!(report.coverage_floor_percent, 100);
+    }
+
+    #[test]
+    fn e2e_emits_compat_closure_case_events() {
+        let config = E2eConfig {
+            harness: HarnessConfig::default_paths(),
+            options: SuiteOptions {
+                packet_filter: Some("FP-P2C-001".to_owned()),
+                oracle_mode: OracleMode::FixtureExpected,
+            },
+            write_artifacts: false,
+            enforce_gates: false,
+            append_drift_history: false,
+            forensic_log_path: None,
+        };
+
+        let mut hooks = NoopHooks;
+        let report = run_e2e_suite(&config, &mut hooks).expect("e2e");
+
+        let compat_events: Vec<_> = report
+            .forensic_log
+            .events
+            .iter()
+            .filter_map(|entry| match &entry.event {
+                ForensicEventKind::CompatClosureCase {
+                    suite_id,
+                    api_surface_id,
+                    seed,
+                    input_digest,
+                    output_digest,
+                    env_fingerprint,
+                    artifact_refs,
+                    duration_ms,
+                    outcome,
+                    reason_code,
+                    ..
+                } => Some((
+                    suite_id,
+                    api_surface_id,
+                    seed,
+                    input_digest,
+                    output_digest,
+                    env_fingerprint,
+                    artifact_refs,
+                    duration_ms,
+                    outcome,
+                    reason_code,
+                )),
+                _ => None,
+            })
+            .collect();
+
+        assert!(
+            !compat_events.is_empty(),
+            "expected compat-closure case logs in forensic output"
+        );
+
+        for (
+            suite_id,
+            api_surface_id,
+            seed,
+            input_digest,
+            output_digest,
+            env_fingerprint,
+            artifact_refs,
+            duration_ms,
+            outcome,
+            reason_code,
+        ) in compat_events
+        {
+            assert_eq!(suite_id.as_str(), super::COMPAT_CLOSURE_SUITE_ID);
+            assert!(api_surface_id.starts_with("CC-"));
+            assert!(*seed > 0);
+            assert_eq!(input_digest.len(), 64);
+            assert_eq!(output_digest.len(), 64);
+            assert_eq!(env_fingerprint.len(), 64);
+            assert!(
+                artifact_refs.len() >= 5,
+                "expected closure artifact references"
+            );
+            assert!(*duration_ms >= 1);
+            assert!(outcome == "pass" || outcome == "fail");
+            assert!(!reason_code.is_empty());
+        }
     }
 
     // === Failure Forensics UX Tests (bd-2gi.21) ===

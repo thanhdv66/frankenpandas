@@ -1,0 +1,110 @@
+{
+  "generated_unix_ms": 1771196335263,
+  "suite_id": "COMPAT-CLOSURE-I",
+  "coverage_report": {
+    "suite_id": "COMPAT-CLOSURE-E",
+    "required_rows": [
+      "CC-001",
+      "CC-002",
+      "CC-003",
+      "CC-004",
+      "CC-005",
+      "CC-006",
+      "CC-007",
+      "CC-008",
+      "CC-009"
+    ],
+    "covered_rows": [
+      "CC-001",
+      "CC-002",
+      "CC-003",
+      "CC-004",
+      "CC-005",
+      "CC-006",
+      "CC-007",
+      "CC-008",
+      "CC-009"
+    ],
+    "uncovered_rows": [],
+    "coverage_floor_percent": 100,
+    "achieved_percent": 100
+  },
+  "strict_zero_drift": true,
+  "hardened_allowlisted_total": 2,
+  "packets": [
+    {
+      "packet_id": "FP-P2C-001",
+      "parity_green": true,
+      "gate_pass": true,
+      "strict_critical_drift_count": 0,
+      "strict_zero_drift": true,
+      "hardened_allowlisted_count": 2,
+      "sidecar_integrity_ok": true,
+      "decode_proof_recovered": true,
+      "risk_notes": [
+        "hardened allowlisted divergence count=2"
+      ]
+    }
+  ],
+  "migration_manifest": {
+    "manifest_version": "1.0.0",
+    "packet_ids": [
+      "FP-P2C-001"
+    ],
+    "compatibility_guarantees": [
+      "strict mode enforces fail-closed compatibility boundaries",
+      "hardened mode divergences remain explicit and bounded via allowlist policy",
+      "alignment and null/NaN semantics are preserved as pandas-observable contracts"
+    ],
+    "known_deltas": [
+      "live-oracle fallback remains opt-in via --allow-system-pandas-fallback",
+      "full pandas API closure beyond scoped packets remains tracked in remaining Phase-2C program beads"
+    ],
+    "rollback_paths": [
+      "re-run packet parity gates with fixture oracle to validate rollback candidate",
+      "use parity_mismatch_corpus replay keys for one-command reproduction of regressions"
+    ],
+    "operational_guardrails": [
+      "require --require-green for release-path conformance execution",
+      "block release when sidecar/decode integrity checks fail",
+      "treat unresolved critical strict-mode drift as release blocker"
+    ]
+  },
+  "reproducibility_ledger": {
+    "env_fingerprint": "109fbc2837b50627a9706bf0a4c5b0023a049cd6ff9bd8cd7d7bda9e8559dc80",
+    "lockfile_path": "Cargo.lock",
+    "replay_commands": [
+      "rch exec -- cargo run -p fp-conformance --bin fp-conformance-cli -- --packet-id FP-P2C-001 --write-artifacts --require-green --write-drift-history --write-differential-validation --write-fault-injection --write-e2e-scenarios --write-final-evidence-pack",
+      "rch exec -- cargo test -p fp-conformance --lib compat_closure_e2e_scenario -- --nocapture",
+      "rch exec -- cargo check --workspace --all-targets",
+      "rch exec -- cargo clippy --workspace --all-targets -- -D warnings"
+    ],
+    "artifact_hashes": {
+      "artifacts/phase2c/COMPAT_CLOSURE_DIFFERENTIAL_FAULT_INJECTION_EVIDENCE.md": "sha256:0dcfbce1a53fe6f24a547049733d2f48783cb6650efa5e9b8e8a21c79285c305",
+      "artifacts/phase2c/COMPAT_CLOSURE_E2E_SCENARIO_EVIDENCE.md": "sha256:5f0c2fba4e66aef72d8e5f8e37162d9671220b9b61c37df2ef3a88652fc43aa2",
+      "artifacts/phase2c/COMPAT_CLOSURE_FINAL_EVIDENCE_PACK.md": "sha256:1555e8b27779af70f96526fab0704774a3bcf4a1eb2289c4c9d382c2404a0e1e",
+      "artifacts/phase2c/COMPAT_CLOSURE_OPTIMIZATION_ISOMORPHISM_EVIDENCE.md": "sha256:412148e2e72ae91df4ecef5d48457f425fe89cc55159bc45b9058271fc379bcf",
+      "artifacts/phase2c/COMPAT_CLOSURE_TEST_LOGGING_EVIDENCE.md": "sha256:3c043387f7048cc0139753af0e9428d165d26c1e446afd381021a756be48b7d7",
+      "artifacts/phase2c/FP-P2C-001/compat_closure_e2e_scenarios.json": "sha256:e3407a08c1d563f4faa3f885ef5611fb9f20246ce69bb2b33244212e99b9b97b",
+      "artifacts/phase2c/FP-P2C-001/differential_validation_log.jsonl": "sha256:801140e5203311b772f63748c0dc1f1316c4eaf697a2260f0c444003ab14b583",
+      "artifacts/phase2c/FP-P2C-001/fault_injection_validation.json": "sha256:03869c67bf1f292ae4febdcdde57eb3575a769bab46edc5abb869f81d84a3908",
+      "artifacts/phase2c/FP-P2C-001/parity_gate_result.json": "sha256:399b3a292dcdf042c533b6d359a90b02d85d38f4a682647108b9f7d7272f1a1b",
+      "artifacts/phase2c/FP-P2C-001/parity_mismatch_corpus.json": "sha256:fc7acfd973c7efa0413aee843efd49203f545ce930f584f586b10ba33c5fc3ef",
+      "artifacts/phase2c/FP-P2C-001/parity_report.decode_proof.json": "sha256:4ff77c7512f8063d9601da7209cf59a93aaef8085c20f22b3b1a69f9e89e98ff",
+      "artifacts/phase2c/FP-P2C-001/parity_report.json": "sha256:2246148e85cbd9643733659440eb534d505c736236500e9fe30ff01b9933f8cf",
+      "artifacts/phase2c/FP-P2C-001/parity_report.raptorq.json": "sha256:a04a3ee03a50b59394d81bba771bb15f1286db040244a87485542278b01ae2d2",
+      "artifacts/phase2c/PERFORMANCE_BASELINES.md": "sha256:7ca200a0e40f0c0ab3e9f13c9df3b1bde2ce8aeea88c06e7d917310d290b5199"
+    }
+  },
+  "benchmark_delta_report_ref": "artifacts/phase2c/PERFORMANCE_BASELINES.md",
+  "invariant_checklist_delta": [
+    "CC-001..CC-009 closure coverage preserved at 100%",
+    "strict-mode differential drift budget remains zero",
+    "RaptorQ sidecar + decode-proof integrity checks remain enforced"
+  ],
+  "risk_note_update": [
+    "hardened allowlisted divergence count=2"
+  ],
+  "all_checks_passed": true,
+  "attestation_signature": "sha256:c6a80c478e5a4628535fb1cb3ad3145e5cd5f218b7e9f02fb7ae923c51c29b33"
+}

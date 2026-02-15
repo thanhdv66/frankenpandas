@@ -188,6 +188,7 @@ The CI performance gate (future) will:
 | 5 | GroupBy sum | Final polish | Minor improvements |
 | 6 | ASUPERSYNC runtime policy (`decide_join_admission`) | Borrowed evidence labels + static join evidence/loss constants | Name-allocation elimination (`11008 -> 0` bytes / 256 calls) and median latency improvement (`430ns -> 380ns`) |
 | 7 | FRANKENTUI replay bundle assembly (`build_frankentui_e2e_replay_bundles`) | Indexed fallback mode lookup (`HashMap<(&str,&str), RuntimeMode>`) replacing repeated linear scans | Stress-path latency reduction (`p50: 20.6ms -> 7.5ms`) and fallback lookup-step collapse (`33,718,464 -> 65,664`) |
+| 8 | COMPAT-CLOSURE scenario synthesis (`build_compat_closure_e2e_scenario_report`) | Single trace-metadata index (`HashMap<trace_id, {operation, mode}>`) replacing dual per-trace indices | Metadata index-node reduction (`65,792 -> 32,896`) and lookup-step reduction (`65,792 -> 32,896`) across 64 amplified iterations |
 
 Rounds 1-5 are documented in `artifacts/perf/ROUND{1..5}_*.md` with full hyperfine, flamegraph, strace, and isomorphism proof artifacts.
 
@@ -236,6 +237,29 @@ rch exec -- cargo test -p fp-frankentui --lib \
 This captures the required single-lever optimization loop for FRANKENTUI-H:
 baseline, one optimization lever, parity proof, and re-baseline.
 
+Round 8 (`bd-2gi.29.8`) evidence snapshot:
+
+```bash
+rch exec -- cargo test -p fp-conformance --lib \
+  compat_closure_e2e_scenario_profile_snapshot_reports_index_delta -- --nocapture
+```
+
+Observed output (2026-02-15):
+- Baseline `p50/p95/p99` (ns): `4167358 / 5477594 / 9182879`
+- Optimized `p50/p95/p99` (ns): `3874091 / 6674277 / 7587292`
+- Trace metadata index nodes (64 iterations, amplified workload): `65792 -> 32896`
+- Trace metadata lookup steps (64 iterations, amplified workload): `65792 -> 32896`
+
+Isomorphism proof command:
+
+```bash
+rch exec -- cargo test -p fp-conformance --lib \
+  compat_closure_e2e_scenario_optimized_path_is_isomorphic_to_baseline
+```
+
+This captures the required single-lever optimization loop for COMPAT-CLOSURE-H:
+baseline, one optimization lever, parity proof, and re-baseline.
+
 ---
 
 ## 7. Optimization Priority Matrix
@@ -262,3 +286,4 @@ This matches the EV scoring used in the Alien Graveyard (bd-2t5e) bead specifica
 - **bd-2gi.8** (2026-02-14): Initial performance baselines document. Defines core benchmark suite, five-phase optimization protocol, behavior-isomorphism evidence requirements, golden checksum registry, regression detection policy, and optimization priority matrix. References 5 completed optimization rounds.
 - **bd-2gi.27.8** (2026-02-15): Added ASUPERSYNC runtime-policy optimization round snapshot (borrowed evidence labels + static join evidence/loss constants), with explicit profile output and baseline-vs-optimized isomorphism test commands.
 - **bd-2gi.28.8** (2026-02-15): Added FRANKENTUI replay-bundle optimization snapshot (indexed fallback mode lookup), including stress-path p50/p95/p99 deltas and lookup-step delta with explicit isomorphism proof command.
+- **bd-2gi.29.8** (2026-02-15): Added COMPAT-CLOSURE scenario-builder optimization snapshot (single trace-metadata index), with p50/p95/p99 capture plus metadata index/lookup deltas and explicit baseline-vs-optimized isomorphism proof command.

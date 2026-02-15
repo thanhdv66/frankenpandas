@@ -1,0 +1,24 @@
+{
+  "manifest_version": "1.0.0",
+  "packet_ids": [
+    "FP-P2C-001"
+  ],
+  "compatibility_guarantees": [
+    "strict mode enforces fail-closed compatibility boundaries",
+    "hardened mode divergences remain explicit and bounded via allowlist policy",
+    "alignment and null/NaN semantics are preserved as pandas-observable contracts"
+  ],
+  "known_deltas": [
+    "live-oracle fallback remains opt-in via --allow-system-pandas-fallback",
+    "full pandas API closure beyond scoped packets remains tracked in remaining Phase-2C program beads"
+  ],
+  "rollback_paths": [
+    "re-run packet parity gates with fixture oracle to validate rollback candidate",
+    "use parity_mismatch_corpus replay keys for one-command reproduction of regressions"
+  ],
+  "operational_guardrails": [
+    "require --require-green for release-path conformance execution",
+    "block release when sidecar/decode integrity checks fail",
+    "treat unresolved critical strict-mode drift as release blocker"
+  ]
+}
