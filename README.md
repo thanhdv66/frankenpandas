@@ -30,6 +30,7 @@ This project uses four pervasive disciplines:
   - strict/hardened runtime policy + evidence ledger
   - optional `asupersync` outcome bridge in `fp-runtime`
   - FTUI-ready galaxy-brain decision cards for transparency surfaces
+  - initial `fp-frankentui` foundation crate with read-only phase2c artifact ingestion, drift-history tolerance for malformed JSONL lines, and dashboard snapshot primitives
 - Phase-2C conformance packet harness landed:
   - packet-scoped suite execution (`FP-P2C-001`, `FP-P2C-002`, `FP-P2C-003`, `FP-P2C-004`, `FP-P2C-005`)
   - packet gates from `parity_gate.yaml` with machine-readable gate results

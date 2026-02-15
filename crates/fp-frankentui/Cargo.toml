@@ -1,0 +1,14 @@
+[package]
+name = "fp-frankentui"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+fp-conformance = { path = "../fp-conformance" }
+fp-runtime = { path = "../fp-runtime" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3.14.0"

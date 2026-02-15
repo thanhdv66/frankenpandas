@@ -11,6 +11,7 @@ members = [
   "crates/fp-io",
   "crates/fp-conformance",
   "crates/fp-runtime",
+  "crates/fp-frankentui",
 ]
 
 [workspace.package]

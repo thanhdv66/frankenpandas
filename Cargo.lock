@@ -275,6 +275,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "fp-frankentui"
+version = "0.1.0"
+dependencies = [
+ "fp-conformance",
+ "fp-runtime",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
 name = "fp-groupby"
 version = "0.1.0"
 dependencies = [
