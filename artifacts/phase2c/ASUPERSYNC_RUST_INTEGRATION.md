@@ -39,6 +39,33 @@ wiring in `fp-runtime/src/lib.rs`. This includes concrete `config`, `error`,
 `codec`, `integrity`, `transport`, and `recovery` seams intended to unblock
 `bd-2gi.27.5`.
 
+**Status update (2026-02-15, PearlStream):** `bd-2gi.27.6` landed deterministic
+differential/forensics replay metadata and a feature-gated conformance hook for
+ASUPERSYNC codec/integrity evidence in `crates/fp-conformance/src/lib.rs`
+(`replay_key`, `trace_id`, `mismatch_class`, `scenario_id`, `step_id`,
+`decision_action`, measured `elapsed_us`, plus optional `asupersync_codec`
+evidence on sidecar artifacts).
+
+**Status update (2026-02-15, PearlStream):** `bd-2gi.27.8` landed a profile-led
+runtime hot-path optimization in `crates/fp-runtime/src/lib.rs`:
+`EvidenceTerm.name` now uses `Cow<'static, str>` and join-admission evidence/loss
+coefficients are static constants (`JOIN_ADMISSION_EVIDENCE_*`,
+`JOIN_ADMISSION_LOSS`) instead of per-decision owned string construction. The
+change is gated by two new proofs:
+- `asupersync_join_admission_optimized_path_is_isomorphic_to_baseline`
+- `asupersync_join_admission_profile_snapshot_reports_allocation_delta`
+
+Snapshot metrics from `rch exec -- cargo test -p fp-runtime --lib asupersync_join_admission_profile_snapshot_reports_allocation_delta -- --nocapture`:
+- Baseline `p50/p95/p99` (ns): `430 / 571 / 5029`
+- Optimized `p50/p95/p99` (ns): `380 / 2695 / 4458`
+- Deterministic name-allocation delta across 256 decisions: `11008 -> 0` bytes
+
+**Status update (2026-02-15, PearlStream):** `bd-2gi.27.9` evidence-pack closure
+now hardens decode-proof pairing in `verify_packet_sidecar_integrity()`:
+decode-proof hashes in `parity_report.decode_proof.json` must be present in
+`parity_report.raptorq.json` envelope proofs and carry `sha256:` prefixes.
+Regression proof: `sidecar_integrity_fails_when_decode_proof_hash_mismatches_sidecar`.
+
 **Non-goals:** This document does not specify FTUI dashboard integration
 (deferred to FrankenTUI beads). It does not design the full Cx capability
 threading through the FrankenPandas call stack (deferred to a separate Cx
@@ -59,13 +86,13 @@ The `fp-runtime` crate (`crates/fp-runtime/src/lib.rs`, 922 lines) contains:
 | `DecisionMetrics`, `DecisionRecord` types | 69-87 | Stable |
 | `GalaxyBrainCard` + `decision_to_card()` | 89-121 | Stable |
 | `EvidenceLedger` (append-only) | 123-144 | Stable |
-| `RuntimePolicy` (strict/hardened) | 146-256 | Stable |
+| `RuntimePolicy` (strict/hardened) | 146-256 | Stable + 27.8 hot-path optimization |
 | `RuntimeError::ClockSkew` + `now_unix_ms()` | 258-270 | **Violation site** (ATS-3.1) |
 | `decide()` (Bayesian engine) | 272-322 | Stable (calls `now_unix_ms`) |
 | `RaptorQEnvelope`, `RaptorQMetadata`, `ScrubStatus`, `DecodeProof` | 324-376 | Placeholder-only |
 | `ConformalGuard` + `ConformalPredictionSet` | 378-551 | Stable |
 | `outcome_to_action()` (feature-gated) | 553-563 | Stable, gated on `asupersync` |
-| Tests (18 test functions) | 565-919 | Passing |
+| Tests (27 test functions) | 565-1324 | Passing |
 
 ### 2.2 Feature Flag Status
 
@@ -96,8 +123,15 @@ The `fp-conformance` crate already performs real RaptorQ encode/decode using the
 - `run_raptorq_decode_recovery_drill()` -- drops source packets and recovers via repair
 - `verify_raptorq_sidecar()` -- validates packet hashes against source data
 
-This conformance-layer RaptorQ usage is the primary consumer of the envelope types
-and will need to integrate with the new ASUPERSYNC modules.
+As of `bd-2gi.27.6`, the conformance path now includes:
+
+- feature flag plumbing in `fp-conformance` (`asupersync = ["fp-runtime/asupersync"]`),
+- optional sidecar field `asupersync_codec` with codec/verifier evidence,
+- feature-gated calls that exercise `PassthroughCodec` (`ArtifactCodec`) and
+  `Fnv1aVerifier` (`IntegrityVerifier`) during sidecar generation/verification.
+
+This keeps the default RaptorQ flow stable while allowing feature-on harness runs
+to execute the same trait boundaries used by ASUPERSYNC runtime modules.
 
 ### 2.4 Current Test Coverage
 
@@ -106,14 +140,15 @@ and will need to integrate with the new ASUPERSYNC modules.
 | Outcome bridge | 0 (feature off by default) | Would need `--features asupersync` |
 | Decision engine (strict) | 1 | `strict_mode_fails_closed_for_unknown_features` |
 | Decision engine (hardened) | 1 | `hardened_mode_repairs_large_join_estimates` |
+| Decision engine isomorphism/perf (ASUPERSYNC-H) | 2 | Baseline-vs-optimized parity + profile snapshot |
 | RaptorQ placeholder | 1 | `placeholder_raptorq_envelope_is_well_formed` |
 | Conformal guard | 11 | AG-09-T suite, comprehensive |
 | Galaxy brain card | 2 | Rendering + content checks |
 | RaptorQ real encode/decode | 3 (in fp-conformance) | Sidecar generation, drill, scrub |
 
-**Gap:** No tests exercise `now_unix_ms()` clock failure, no tests exercise the
-outcome bridge (requires feature flag), and no integration tests cross
-fp-runtime and fp-conformance for ASUPERSYNC workflows.
+**Gap:** No tests exercise `now_unix_ms()` clock failure; outcome bridge tests
+still require `--features asupersync`; and full feature-on integration CI is
+currently constrained by upstream `asupersync` dependency compile blockers.
 
 ---
 
@@ -1412,13 +1447,16 @@ Using `proptest` or `quickcheck` (already available in workspace for property te
 
 ### 11.4 Conformance Harness Hooks
 
-The `fp-conformance` crate currently calls `raptorq` directly. Phase 4 introduces
-an optional migration path:
+The `fp-conformance` crate currently keeps `raptorq` as its primary encoding
+path, with an optional ASUPERSYNC hook path now implemented:
 
-1. `fp-conformance` depends on `fp-runtime` with `features = ["asupersync"]`
-2. `generate_raptorq_sidecar()` delegates to `ArtifactCodec::encode()` when available
-3. `verify_raptorq_sidecar()` delegates to `IntegrityVerifier::verify_sidecar()`
-4. Existing `raptorq`-direct code paths remain as fallback (feature off)
+1. `fp-conformance` now exposes a crate feature forwarding to `fp-runtime/asupersync`.
+2. `generate_raptorq_sidecar()` emits optional `asupersync_codec` evidence by
+   running `PassthroughCodec::encode/decode` + `Fnv1aVerifier::verify` under
+   feature-on builds.
+3. `verify_raptorq_sidecar()` re-validates ASUPERSYNC integrity evidence under
+   feature-on builds.
+4. Existing `raptorq`-direct code paths remain the default fallback (feature off).
 
 This ensures the conformance harness exercises the same code paths as production
 ASUPERSYNC usage.

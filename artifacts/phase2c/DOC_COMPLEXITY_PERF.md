@@ -936,6 +936,29 @@ Performance sentinels are benchmark anchors that detect regressions and validate
 - FP vectorized: `fp-columnar/src/lib.rs:367` (`vectorized_binary_f64`)
 - FP scalar: `fp-columnar/src/lib.rs:688` (scalar fallback in `binary_numeric`)
 
+### 6.11 Sentinel S11: ASUPERSYNC Join-Admission Decision Path
+
+**What:** Compare baseline vs optimized `RuntimePolicy::decide_join_admission` behavior and latency/allocation profile under mixed-cap workloads.
+
+**Input:** Hardened policy with cap `2048`; 256 deterministic mixed rows (`<= cap` and `> cap`) as executed by:
+- `asupersync_join_admission_optimized_path_is_isomorphic_to_baseline`
+- `asupersync_join_admission_profile_snapshot_reports_allocation_delta`
+
+**Expected:**
+- **Isomorphism:** Identical action, issue payload, prior, metrics, and evidence coefficients between optimized and baseline paths.
+- **Allocation budget:** `EvidenceTerm.name` allocation for decision evidence is zero on the optimized path (borrowed labels via `Cow<'static, str>`), versus baseline per-call owned strings.
+- **Latency snapshot:** Track `p50/p95/p99` for both paths; on 2026-02-15 snapshot, baseline `430/571/5029 ns`, optimized `380/2695/4458 ns` (local fallback run via `rch`).
+
+**Regression threshold:**
+- Any semantic mismatch in optimized-vs-baseline record comparison is a hard fail.
+- Any non-zero optimized evidence-name allocation budget is a hard fail.
+
+**File references:**
+- Runtime policy path: `crates/fp-runtime/src/lib.rs:254` (`decide_join_admission`)
+- Optimization constants: `crates/fp-runtime/src/lib.rs:76`, `crates/fp-runtime/src/lib.rs:89`, `crates/fp-runtime/src/lib.rs:102`, `crates/fp-runtime/src/lib.rs:115`
+- Isomorphism/profiling proofs: `crates/fp-runtime/src/lib.rs:747`, `crates/fp-runtime/src/lib.rs:769`
+- Replay command: `rch exec -- cargo test -p fp-runtime --lib asupersync_join_admission_profile_snapshot_reports_allocation_delta -- --nocapture`
+
 ---
 
 ## Appendix A: Complexity Summary Table

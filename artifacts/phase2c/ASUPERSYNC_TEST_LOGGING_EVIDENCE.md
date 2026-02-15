@@ -130,6 +130,6 @@ ASUPERSYNC-E tests increase coverage in:
 ## 7. Known Gaps and Next Steps
 
 1. Feature-gated direct `outcome_to_action` variant mapping tests under `asupersync` feature are still a follow-up.
-2. Cross-crate differential/e2e logging for ASUPERSYNC-E remains for beads `bd-2gi.27.6` and `bd-2gi.27.7`.
-3. CI wiring for this bead should continue to use upstream gate topology and follow-on conformance evidence packets.
-
+2. Closed (2026-02-15): cross-crate differential/E2E logging parity for ASUPERSYNC is now wired through `fp-conformance` forensic case events (`scenario_id`, `trace_id`, `step_id`, `seed`, `assertion_path`, `result`, `replay_cmd`, `replay_key`, `mismatch_class`) and replay-oriented failure digests.
+3. Feature-on CI wiring remains constrained by upstream `asupersync` dependency compilation blockers; continue using default-path conformance gates plus targeted feature-path smoke once dependency is fixed.
+4. Closed (2026-02-15): sidecar/decode-proof evidence binding now enforces proof-hash pairing (`parity_report.decode_proof.json` hashes must exist in sidecar envelope proofs with `sha256:` prefix) via `verify_packet_sidecar_integrity()` and regression test `sidecar_integrity_fails_when_decode_proof_hash_mismatches_sidecar`.

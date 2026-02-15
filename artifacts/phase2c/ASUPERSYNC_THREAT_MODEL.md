@@ -529,6 +529,11 @@ Prioritized list of security hardening steps, ordered by impact and urgency.
 - Add `artifact_id: String` and `nonce: u64` fields to `DecodeProof`.
 - Validate that proof `artifact_id` matches envelope `artifact_id` before
   accepting the proof.
+- **Status (2026-02-15):** Partial mitigation landed in
+  `verify_packet_sidecar_integrity()` by enforcing decode-proof hash pairing
+  between sidecar envelope and decode-proof artifact plus `sha256:` prefix
+  validation (`sidecar_integrity_fails_when_decode_proof_hash_mismatches_sidecar`).
+  Full `artifact_id + nonce` binding is still pending.
 - **Blocked by:** Nothing.
 - **Blocks:** Proof replay prevention.
 
@@ -676,7 +681,7 @@ cover the expanded surface.
 | ATS-3.4 | **R-01 (remediate ambient authority)** | **P0** |
 | ATS-4.1 | R-08 (placeholder status) | P2 |
 | ATS-4.2 | **R-03 (authenticated symbols)** | **P1** |
-| ATS-4.3 | **R-04 (proof binding)** | **P1** |
+| ATS-4.3 | **R-04 (proof binding; partial hash-link mitigation landed 2026-02-15)** | **P1** |
 | ATS-4.4 | R-07 (cap decode proofs) | P2 |
 | ATS-4.5 | R-08 (placeholder status) | P2 |
 | ATS-5.1 | R-06 (cancellation checkpoints) | P2 |

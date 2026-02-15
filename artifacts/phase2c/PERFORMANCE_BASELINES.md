@@ -186,8 +186,31 @@ The CI performance gate (future) will:
 | 3 | GroupBy sum | Key deduplication | Memory reduction |
 | 4 | GroupBy sum | Generic fallback path | Code simplification |
 | 5 | GroupBy sum | Final polish | Minor improvements |
+| 6 | ASUPERSYNC runtime policy (`decide_join_admission`) | Borrowed evidence labels + static join evidence/loss constants | Name-allocation elimination (`11008 -> 0` bytes / 256 calls) and median latency improvement (`430ns -> 380ns`) |
 
-All rounds documented in `artifacts/perf/ROUND{1..5}_*.md` with full hyperfine, flamegraph, strace, and isomorphism proof artifacts.
+Rounds 1-5 are documented in `artifacts/perf/ROUND{1..5}_*.md` with full hyperfine, flamegraph, strace, and isomorphism proof artifacts.
+
+Round 6 (`bd-2gi.27.8`) evidence snapshot:
+
+```bash
+rch exec -- cargo test -p fp-runtime --lib \
+  asupersync_join_admission_profile_snapshot_reports_allocation_delta -- --nocapture
+```
+
+Observed output (2026-02-15):
+- Baseline `p50/p95/p99` (ns): `430 / 571 / 5029`
+- Optimized `p50/p95/p99` (ns): `380 / 2695 / 4458`
+- Name allocation bytes (256 calls): `11008 -> 0`
+
+Isomorphism proof command:
+
+```bash
+rch exec -- cargo test -p fp-runtime --lib \
+  asupersync_join_admission_optimized_path_is_isomorphic_to_baseline
+```
+
+This captures the required single-lever optimization loop for ASUPERSYNC-H:
+baseline, one optimization lever, parity proof, and re-baseline.
 
 ---
 
@@ -213,3 +236,4 @@ This matches the EV scoring used in the Alien Graveyard (bd-2t5e) bead specifica
 ## Changelog
 
 - **bd-2gi.8** (2026-02-14): Initial performance baselines document. Defines core benchmark suite, five-phase optimization protocol, behavior-isomorphism evidence requirements, golden checksum registry, regression detection policy, and optimization priority matrix. References 5 completed optimization rounds.
+- **bd-2gi.27.8** (2026-02-15): Added ASUPERSYNC runtime-policy optimization round snapshot (borrowed evidence labels + static join evidence/loss constants), with explicit profile output and baseline-vs-optimized isomorphism test commands.

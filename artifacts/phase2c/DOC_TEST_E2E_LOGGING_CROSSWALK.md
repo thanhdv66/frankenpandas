@@ -112,7 +112,7 @@ Current fixture corpus operation counts (derived from `crates/fp-conformance/fix
 | E2E lifecycle orchestration | `crates/fp-conformance/src/lib.rs:4263` | N/A | N/A | orchestrator path: `crates/fp-conformance/src/lib.rs:3500` | forensic JSONL events: `crates/fp-conformance/src/lib.rs:3329` | covered with field gaps |
 | Failure forensics digest and one-command replay | `crates/fp-conformance/src/lib.rs:4530` | N/A | consumes differential results | used by E2E report: `crates/fp-conformance/src/lib.rs:3782` | replay string format: `crates/fp-conformance/src/lib.rs:3801`; UX contract: `artifacts/phase2c/FAILURE_FORENSICS_UX.md:24` | covered |
 | CI reliability gate forensic traceability | `crates/fp-conformance/src/lib.rs:4856` | N/A | N/A | CI pipeline invokes E2E gate: `crates/fp-conformance/src/lib.rs:1706` | `CiGateForensicsEntry.repro_cmd`: `crates/fp-conformance/src/lib.rs:1531` | covered |
-| ASUPERSYNC structured test logs | `crates/fp-runtime/src/lib.rs:629` | property-style checks: `crates/fp-runtime/src/lib.rs:664`, `crates/fp-runtime/src/lib.rs:700`, `crates/fp-runtime/src/lib.rs:738` | N/A | N/A | schema + replay contract: `artifacts/phase2c/ASUPERSYNC_TEST_LOGGING_EVIDENCE.md:51` | covered (runtime-scope only) |
+| ASUPERSYNC structured test logs | `crates/fp-runtime/src/lib.rs:629` | property-style checks: `crates/fp-runtime/src/lib.rs:664`, `crates/fp-runtime/src/lib.rs:700`, `crates/fp-runtime/src/lib.rs:738` | conformance schema parity via deterministic forensic case bundle fields | E2E case-event bundle assertions: `crates/fp-conformance/src/lib.rs:4758` | schema + replay contract: `artifacts/phase2c/ASUPERSYNC_TEST_LOGGING_EVIDENCE.md:51` | covered (runtime + conformance parity) |
 
 ---
 
@@ -121,10 +121,10 @@ Current fixture corpus operation counts (derived from `crates/fp-conformance/fix
 | Layer | Fields currently emitted | Required replay/forensics fields status | Source anchors |
 |---|---|---|---|
 | Runtime structured unit/property logs (`fp-runtime`) | `packet_id`, `case_id`, `mode`, `seed`, `trace_id`, `assertion_path`, `result`, `replay_cmd` | full coverage for the ASUPERSYNC test layer | `crates/fp-runtime/src/lib.rs:580`, `crates/fp-runtime/src/lib.rs:610` |
-| Differential result objects (`fp-conformance`) | `packet_id`, `case_id`, `mode`, `oracle_source`, `status`, `drift_records`, `evidence_records` | has core identity + oracle context; no explicit `replay_key` field | `crates/fp-conformance/src/lib.rs:301` |
-| Drift records | `category`, `level`, `location`, `message` | supports mismatch taxonomy; no dedicated `mismatch_class` alias field | `crates/fp-conformance/src/lib.rs:292` |
-| E2E forensic events | suite/packet/case/artifact/gate/error events, plus `elapsed_us` on `CaseEnd` | has lifecycle trace; missing explicit `scenario_id`, `trace_id`, `step_id`, `decision_action`; `elapsed_us` currently hardcoded `0` in retrospective path | `crates/fp-conformance/src/lib.rs:3329`, `crates/fp-conformance/src/lib.rs:3535` |
-| Failure digest | `packet_id`, `case_id`, `operation`, `mode`, `mismatch_summary`, `replay_command`, `artifact_path` | directly supports one-command replay and artifact lookup | `crates/fp-conformance/src/lib.rs:3698`, `crates/fp-conformance/src/lib.rs:3801` |
+| Differential result objects (`fp-conformance`) | `packet_id`, `case_id`, `mode`, `oracle_source`, `status`, `replay_key`, `trace_id`, `drift_records`, `evidence_records` | explicit replay metadata now emitted for deterministic replay joins with forensics | `crates/fp-conformance/src/lib.rs:316`, `crates/fp-conformance/src/lib.rs:2932` |
+| Drift records | `category`, `level`, `mismatch_class`, `location`, `message` | dedicated mismatch taxonomy alias now emitted as first-class field | `crates/fp-conformance/src/lib.rs:305`, `crates/fp-conformance/src/lib.rs:396` |
+| E2E forensic events | suite/packet/case/artifact/gate/error events, with `scenario_id`, `trace_id`, `step_id`, `seed`, `assertion_path`, `result`, `decision_action`, `replay_key`, `replay_cmd`, `mismatch_class`, `elapsed_us` on `CaseEnd` | lifecycle trace now carries deterministic replay identity plus deterministic replay-bundle fields aligned with ASUPERSYNC runtime logs | `crates/fp-conformance/src/lib.rs:3590`, `crates/fp-conformance/src/lib.rs:3816`, `crates/fp-conformance/src/lib.rs:3838` |
+| Failure digest | `packet_id`, `case_id`, `operation`, `mode`, `mismatch_class`, `replay_key`, `trace_id`, `mismatch_summary`, `replay_command`, `artifact_path` | directly supports one-command replay plus stable trace/replay-key joins to forensic events | `crates/fp-conformance/src/lib.rs:3970`, `crates/fp-conformance/src/lib.rs:4088` |
 | CI gate forensics | `rule_id`, `gate`, `elapsed_ms`, `commands`, `repro_cmd` | includes deterministic reproduction command per failing gate | `crates/fp-conformance/src/lib.rs:1531`, `crates/fp-conformance/src/lib.rs:1569` |
 | Drift history ledger | `ts_unix_ms`, `packet_id`, `suite`, `fixture_count`, `passed`, `failed`, `strict_failed`, `hardened_failed`, `gate_pass`, `report_hash` | supports run-level auditability; no per-case replay keys | `crates/fp-conformance/src/lib.rs:440`, `crates/fp-conformance/src/lib.rs:652` |
 
@@ -147,11 +147,12 @@ Current fixture corpus operation counts (derived from `crates/fp-conformance/fix
 
 | Priority | Gap | Impact | Proposed follow-up |
 |---|---|---|---|
-| `P0` | E2E forensic `CaseEnd.elapsed_us` is currently `0` in retrospective run path | loses actionable per-case latency evidence for forensics/perf gates | capture real per-case timings inside execution loop and emit non-zero deterministic durations (`crates/fp-conformance/src/lib.rs:3540`) |
-| `P0` | E2E logs do not currently emit explicit `scenario_id`, `trace_id`, `step_id`, `decision_action` fields | weakens contract alignment with stricter replay/forensics schemas | extend `ForensicEventKind::CaseStart/CaseEnd` payload and E2E emitter pipeline to include these fields |
-| `P1` | Differential results have no dedicated `replay_key` and no explicit `mismatch_class` field name | replay/mismatch workflows require deriving from free-form fields | add explicit fields on `DifferentialResult` / `DriftRecord` and include them in mismatch corpus |
+| `Closed (2026-02-15)` | E2E forensic `CaseEnd.elapsed_us` was `0` in retrospective run path | resolved: case execution now records measured `elapsed_us` and emits `max(1)` in forensic events | `crates/fp-conformance/src/lib.rs:2138`, `crates/fp-conformance/src/lib.rs:3799` |
+| `Closed (2026-02-15)` | E2E logs lacked explicit `scenario_id`, `trace_id`, `step_id`, `decision_action` fields | resolved: `CaseStart`/`CaseEnd` now include these fields with deterministic IDs | `crates/fp-conformance/src/lib.rs:3565`, `crates/fp-conformance/src/lib.rs:3574`, `crates/fp-conformance/src/lib.rs:3779` |
+| `Closed (2026-02-15)` | Differential results had no dedicated `replay_key` and drift records had no `mismatch_class` field | resolved: explicit fields added and propagated to failure forensics/mismatch artifacts | `crates/fp-conformance/src/lib.rs:316`, `crates/fp-conformance/src/lib.rs:305`, `crates/fp-conformance/src/lib.rs:4084` |
+| `Closed (2026-02-15)` | Sidecar/decode-proof integrity checks accepted unpaired proof hashes | resolved: `verify_packet_sidecar_integrity()` now validates decode-proof hash linkage against sidecar envelope proofs and `sha256:` prefix constraints | `crates/fp-conformance/src/lib.rs:1548`, `crates/fp-conformance/src/lib.rs:5121` |
 | `P1` | CSV/dtype and nan/fill/drop operations have low fixture multiplicity (mostly 1-2 cases) | higher risk of edge-case blind spots | expand fixture matrix per operation with strict+hardened+edge triples per coverage doctrine |
-| `P1` | ASUPERSYNC structured log contract is runtime-local; no equivalent schema enforced for broader conformance/e2e logs | inconsistent operator experience and partial replay fidelity | unify schema contract across `fp-runtime` test logs and conformance forensic events |
+| `Closed (2026-02-15)` | ASUPERSYNC structured log contract was runtime-local with no equivalent conformance/e2e schema | resolved: conformance `CaseStart/CaseEnd` now emit deterministic `seed/assertion_path/result/replay_cmd` bundle fields and are regression-tested | `crates/fp-conformance/src/lib.rs:3590`, `crates/fp-conformance/src/lib.rs:4628`, `crates/fp-conformance/src/lib.rs:4758` |
 | `P2` | Live-oracle operation surface in `pandas_oracle.py` remains intentionally narrow | parity confidence limited for unsupported ops | extend oracle dispatch with additional operations once fixture coverage expands |
 
 ---
@@ -163,4 +164,3 @@ Current fixture corpus operation counts (derived from `crates/fp-conformance/fix
 | Each major documented behavior maps to tests/e2e/log artifacts | complete | Section 3 |
 | Coverage gaps are explicit and prioritized | complete | Section 6 |
 | Logging fields required for replay/forensics are documented | complete | Sections 4 and 5 |
-

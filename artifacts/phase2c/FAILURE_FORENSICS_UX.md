@@ -20,6 +20,9 @@ When a conformance test fails, the system emits a `FailureDigest` with this disp
 
 ```
 FAIL FP-P2C-001::series_add_alignment_union_strict [SeriesAdd/Strict]
+  Class:    value_critical
+  ReplayKey: FP-P2C-001/series_add_alignment_union_strict/strict
+  Trace:    FP-P2C-001:series_add_alignment_union_strict:strict
   Mismatch: expected Int64(10), got Float64(10.0) at index[0]
   Replay:   cargo test -p fp-conformance -- series_add_alignment_union_strict --nocapture
   Artifact: artifacts/phase2c/FP-P2C-001/parity_mismatch_corpus.json
@@ -27,6 +30,9 @@ FAIL FP-P2C-001::series_add_alignment_union_strict [SeriesAdd/Strict]
 
 Fields:
 - **FAIL line**: `{packet_id}::{case_id} [{operation}/{mode}]`
+- **Class**: deterministic mismatch taxonomy alias (`<category>_<level>`)
+- **ReplayKey**: deterministic replay identity (`{packet_id}/{case_id}/{mode}`)
+- **Trace**: deterministic trace identity (`{packet_id}:{case_id}:{mode}`)
 - **Mismatch**: First 200 characters of the mismatch description
 - **Replay**: Exact cargo command to reproduce the failure
 - **Artifact**: Path to the mismatch corpus for full details
@@ -148,7 +154,7 @@ cargo test -p fp-conformance -- {case_id} --nocapture
 
 ```rust
 pub struct ArtifactId { packet_id, artifact_kind, run_ts_unix_ms }
-pub struct FailureDigest { packet_id, case_id, operation, mode, mismatch_summary, replay_command, artifact_path }
+pub struct FailureDigest { packet_id, case_id, operation, mode, mismatch_class, replay_key, trace_id, mismatch_summary, replay_command, artifact_path }
 pub struct FailureForensicsReport { run_ts_unix_ms, total_fixtures, total_passed, total_failed, failures, gate_failures }
 ```
 

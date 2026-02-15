@@ -330,6 +330,48 @@ Each scenario specifies:
 
 ---
 
+### UW-011: ASUPERSYNC Artifact Replication + Recovery Drill
+
+**Domain**: Reliability / Operability  
+**Operations**: `run_e2e_suite` -> `write_packet_artifacts` -> `generate_raptorq_sidecar` -> `run_raptorq_decode_recovery_drill` -> `verify_raptorq_sidecar` -> `build_failure_forensics`  
+**Packets**: FP-P2C-001, FP-P2C-004, FP-P2C-008
+
+**Story**: Operator runs the ASUPERSYNC-backed conformance path, validates deterministic replay metadata, then confirms recovery/forensics artifacts are sufficient to reproduce and diagnose failures without exploratory reruns.
+
+**Golden/Regression/Failure-Injection Matrix**:
+
+| Scenario class | Mode | Packet focus | Expected output |
+|---|---|---|---|
+| Golden | strict + hardened | FP-P2C-001 | `gates_pass=true`, no failure digests, forensic case events include deterministic replay bundle fields (`scenario_id`, `trace_id`, `step_id`, `seed`, `assertion_path`, `result`, `replay_cmd`) |
+| Regression | strict + hardened | FP-P2C-004 | mismatch corpus entries include `replay_key` and `mismatch_class`; failure digest includes `mismatch_class`, `replay_key`, `trace_id`; one-command replay stays stable |
+| Failure injection | strict + hardened | FP-P2C-008 | decode drill drops source packets and still recovers payload; sidecar scrub remains auditable; forensic report links replay command + artifact path for root-cause analysis |
+
+**Golden Journey**:
+```
+1. Run E2E orchestrator with packet filter and artifacts enabled
+   -> run_e2e_suite(config, hooks)
+   -> emits deterministic CaseStart/CaseEnd forensic events and packet artifacts
+
+2. Materialize sidecar + recovery evidence
+   -> generate_raptorq_sidecar(...)
+   -> run_raptorq_decode_recovery_drill(...)
+   -> verify_raptorq_sidecar(...)
+
+3. Build failure forensics bundle
+   -> build_failure_forensics(&e2e_report)
+   -> digest lines include mismatch class + replay key + trace + one-command replay
+
+4. Replay a failing case directly
+   -> cargo test -p fp-conformance -- <case_id> --nocapture
+```
+
+**Edge Cases**:
+- Feature-off path keeps direct `raptorq` fallback and still emits deterministic replay metadata.
+- Feature-on path emits optional ASUPERSYNC codec evidence sidecar section.
+- Failure injection with dropped source packets must still produce decode proof artifact and replayable forensics context.
+
+---
+
 ## 4. Golden Journey Test Integration
 
 Each scenario maps to one or more conformance fixtures. The mapping:
@@ -346,6 +388,7 @@ Each scenario maps to one or more conformance fixtures. The mapping:
 | UW-008 | `fp_p2c_002_*` |
 | UW-009 | `fp_p2c_001_*` |
 | UW-010 | `fp_p2c_001_*` + `fp_p2c_005_*` + `fp_p2c_008_*` |
+| UW-011 | `fp_p2c_001_*` + `fp_p2c_004_*` + `fp_p2c_008_*` |
 
 ### Scenario Coverage Matrix
 
@@ -354,9 +397,9 @@ Each scenario maps to one or more conformance fixtures. The mapping:
 | FP-P2C-001 | UW-001, UW-003, UW-004, UW-009, UW-010 |
 | FP-P2C-002 | UW-005, UW-008 |
 | FP-P2C-003 | UW-003, UW-005 |
-| FP-P2C-004 | UW-002, UW-007 |
+| FP-P2C-004 | UW-002, UW-007, UW-011 |
 | FP-P2C-005 | UW-002, UW-006, UW-010 |
-| FP-P2C-008 | UW-001, UW-004, UW-010 |
+| FP-P2C-008 | UW-001, UW-004, UW-010, UW-011 |
 
 ---
 
@@ -366,7 +409,7 @@ Each scenario maps to one or more conformance fixtures. The mapping:
 |---|---|---|
 | **Simple** | Single operation, no alignment | UW-008 |
 | **Standard** | 2-3 operations, basic alignment | UW-001, UW-003, UW-005, UW-006, UW-007, UW-009 |
-| **Pipeline** | Multi-step with I/O | UW-002, UW-004, UW-010 |
+| **Pipeline** | Multi-step with I/O and forensic/replay artifacts | UW-002, UW-004, UW-010, UW-011 |
 
 Each tier has different reliability expectations:
 - **Simple**: 100% pass rate, no flakes
@@ -394,3 +437,4 @@ These patterns are explicitly out of scope for Phase-2C:
 ## Changelog
 
 - **bd-2gi.20** (2026-02-14): Initial corpus with 10 user workflow scenarios covering CSV I/O, arithmetic alignment, joins, groupby, index operations, round-trip stability, and multi-step pipelines. Includes scenario-to-packet mapping, coverage matrix, and complexity tiers.
+- **bd-2gi.27.7** (2026-02-15): Added UW-011 ASUPERSYNC reliability workflow with explicit golden/regression/failure-injection matrix and replay/forensics bundle requirements.
