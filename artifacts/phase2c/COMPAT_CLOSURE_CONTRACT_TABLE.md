@@ -2,7 +2,7 @@
 
 Bead: `bd-2gi.29.2` [COMPAT-CLOSURE-B]  
 Subsystem: Drop-in compatibility closure contract surface for alignment, dtype/null semantics, join/groupby contracts, differential gates, and migration evidence  
-Source anchor: `artifacts/phase2c/COMPAT_CLOSURE_ANCHOR_MAP.md` (bd-2gi.29.1)
+Source anchors: `artifacts/phase2c/COMPAT_CLOSURE_ANCHOR_MAP.md` (bd-2gi.29.1), `artifacts/phase2c/COMPAT_CLOSURE_THREAT_MODEL.md` (bd-2gi.29.3)
 
 ---
 
@@ -173,4 +173,5 @@ These remain out of closure claim until green evidence is attached:
    - strict/hardened expected outcomes
    - fail-closed classification (`FC-*` or explicit `N/A`)
    - evidence mapping.
-
+4. `bd-2gi.29.3` output is now materialized in `artifacts/phase2c/COMPAT_CLOSURE_THREAT_MODEL.md`; downstream beads should treat it as the authoritative threat/risk register for closure sign-off.
+5. `bd-2gi.29.4` output is now materialized in `artifacts/phase2c/COMPAT_CLOSURE_RUST_INTEGRATION.md`; downstream beads should treat it as the authoritative module-boundary and sequencing plan for `29.5..29.9`.

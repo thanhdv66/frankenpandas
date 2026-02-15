@@ -374,7 +374,7 @@ contract tables, policy matrices, threat models, validation plans, and final att
 
 ---
 
-## 11. Downstream Hand-off Notes (for bd-2gi.29.2)
+## 11. Downstream Hand-off Notes (for bd-2gi.29.2 and bd-2gi.29.3)
 
 Use this anchor map to construct the COMPAT-CLOSURE contract table and strict/hardened policy matrix by:
 
@@ -382,4 +382,5 @@ Use this anchor map to construct the COMPAT-CLOSURE contract table and strict/ha
 2. Mapping each rule to strict-mode and hardened-mode expected outcomes.
 3. Linking each rule to evidence artifacts (`parity_report`, `parity_gate_result`, `mismatch_corpus`, `drift_history`).
 4. Marking each Undefined/Gap edge as explicit open contract item (not silent debt).
-
+5. Emitting a fail-closed threat matrix in `artifacts/phase2c/COMPAT_CLOSURE_THREAT_MODEL.md` with explicit abuse/drift classes, compatibility envelopes, and testable controls keyed to `CC-*`/`FC-*` rows.
+6. Emitting an integration/module-seam plan in `artifacts/phase2c/COMPAT_CLOSURE_RUST_INTEGRATION.md` that maps contract/threat rows to concrete ownership and phased execution for `29.5..29.9`.
