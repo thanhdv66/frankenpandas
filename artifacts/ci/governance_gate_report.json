@@ -1,0 +1,1185 @@
+{
+  "bead_id": "bd-2gi.30",
+  "generated_unix_ms": 1771121133347,
+  "repo_root": "/data/projects/frankenpandas/crates/fp-conformance/../..",
+  "all_passed": false,
+  "violation_count": 4,
+  "violations": [
+    {
+      "rule_id": "GOV-003",
+      "artifact_id": "AGENTS.md",
+      "artifact_path": "AGENTS.md",
+      "bead_id": null,
+      "trace_id": "GOV-003::AGENTS.md",
+      "result": "fail",
+      "repro_cmd": "./scripts/governance_gate_check.sh",
+      "message": "missing method-stack marker(s): alien-artifact-coding, extreme-software-optimization, alien-graveyard"
+    },
+    {
+      "rule_id": "GOV-001",
+      "artifact_id": "README.md",
+      "artifact_path": "README.md",
+      "bead_id": null,
+      "trace_id": "GOV-001::README.md",
+      "result": "fail",
+      "repro_cmd": "./scripts/governance_gate_check.sh",
+      "message": "missing total-parity mandate marker (expected phrases like 'ABSOLUTE AND TOTAL' or 'drop-in replacement')"
+    },
+    {
+      "rule_id": "GOV-003",
+      "artifact_id": "README.md",
+      "artifact_path": "README.md",
+      "bead_id": null,
+      "trace_id": "GOV-003::README.md",
+      "result": "fail",
+      "repro_cmd": "./scripts/governance_gate_check.sh",
+      "message": "missing method-stack marker(s): alien-graveyard"
+    },
+    {
+      "rule_id": "GOV-002",
+      "artifact_id": "bd-2gi.30",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.30",
+      "trace_id": "GOV-002::bd-2gi.30",
+      "result": "fail",
+      "repro_cmd": "./scripts/governance_gate_check.sh",
+      "message": "scope-narrowing phrase detected without explicit negation: 'minimal-v1'"
+    }
+  ],
+  "events": [
+    {
+      "rule_id": "GOV-001",
+      "artifact_id": "AGENTS.md",
+      "artifact_path": "AGENTS.md",
+      "bead_id": null,
+      "trace_id": "GOV-001::AGENTS.md",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-002",
+      "artifact_id": "AGENTS.md",
+      "artifact_path": "AGENTS.md",
+      "bead_id": null,
+      "trace_id": "GOV-002::AGENTS.md",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-003",
+      "artifact_id": "AGENTS.md",
+      "artifact_path": "AGENTS.md",
+      "bead_id": null,
+      "trace_id": "GOV-003::AGENTS.md",
+      "result": "fail",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-001",
+      "artifact_id": "README.md",
+      "artifact_path": "README.md",
+      "bead_id": null,
+      "trace_id": "GOV-001::README.md",
+      "result": "fail",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-002",
+      "artifact_id": "README.md",
+      "artifact_path": "README.md",
+      "bead_id": null,
+      "trace_id": "GOV-002::README.md",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-003",
+      "artifact_id": "README.md",
+      "artifact_path": "README.md",
+      "bead_id": null,
+      "trace_id": "GOV-003::README.md",
+      "result": "fail",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-001",
+      "artifact_id": "bd-2gi",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi",
+      "trace_id": "GOV-001::bd-2gi",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-002",
+      "artifact_id": "bd-2gi",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi",
+      "trace_id": "GOV-002::bd-2gi",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-003",
+      "artifact_id": "bd-2gi",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi",
+      "trace_id": "GOV-003::bd-2gi",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-001",
+      "artifact_id": "bd-2gi.11",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.11",
+      "trace_id": "GOV-001::bd-2gi.11",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-002",
+      "artifact_id": "bd-2gi.11",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.11",
+      "trace_id": "GOV-002::bd-2gi.11",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-003",
+      "artifact_id": "bd-2gi.11",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.11",
+      "trace_id": "GOV-003::bd-2gi.11",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-001",
+      "artifact_id": "bd-2gi.23",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.23",
+      "trace_id": "GOV-001::bd-2gi.23",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-002",
+      "artifact_id": "bd-2gi.23",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.23",
+      "trace_id": "GOV-002::bd-2gi.23",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-003",
+      "artifact_id": "bd-2gi.23",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.23",
+      "trace_id": "GOV-003::bd-2gi.23",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-001",
+      "artifact_id": "bd-2gi.23.10",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.23.10",
+      "trace_id": "GOV-001::bd-2gi.23.10",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-002",
+      "artifact_id": "bd-2gi.23.10",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.23.10",
+      "trace_id": "GOV-002::bd-2gi.23.10",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-003",
+      "artifact_id": "bd-2gi.23.10",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.23.10",
+      "trace_id": "GOV-003::bd-2gi.23.10",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-001",
+      "artifact_id": "bd-2gi.23.12",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.23.12",
+      "trace_id": "GOV-001::bd-2gi.23.12",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-002",
+      "artifact_id": "bd-2gi.23.12",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.23.12",
+      "trace_id": "GOV-002::bd-2gi.23.12",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-003",
+      "artifact_id": "bd-2gi.23.12",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.23.12",
+      "trace_id": "GOV-003::bd-2gi.23.12",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-001",
+      "artifact_id": "bd-2gi.23.13",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.23.13",
+      "trace_id": "GOV-001::bd-2gi.23.13",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-002",
+      "artifact_id": "bd-2gi.23.13",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.23.13",
+      "trace_id": "GOV-002::bd-2gi.23.13",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-003",
+      "artifact_id": "bd-2gi.23.13",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.23.13",
+      "trace_id": "GOV-003::bd-2gi.23.13",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-001",
+      "artifact_id": "bd-2gi.23.14",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.23.14",
+      "trace_id": "GOV-001::bd-2gi.23.14",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-002",
+      "artifact_id": "bd-2gi.23.14",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.23.14",
+      "trace_id": "GOV-002::bd-2gi.23.14",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-003",
+      "artifact_id": "bd-2gi.23.14",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.23.14",
+      "trace_id": "GOV-003::bd-2gi.23.14",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-001",
+      "artifact_id": "bd-2gi.23.15",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.23.15",
+      "trace_id": "GOV-001::bd-2gi.23.15",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-002",
+      "artifact_id": "bd-2gi.23.15",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.23.15",
+      "trace_id": "GOV-002::bd-2gi.23.15",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-003",
+      "artifact_id": "bd-2gi.23.15",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.23.15",
+      "trace_id": "GOV-003::bd-2gi.23.15",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-001",
+      "artifact_id": "bd-2gi.23.16",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.23.16",
+      "trace_id": "GOV-001::bd-2gi.23.16",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-002",
+      "artifact_id": "bd-2gi.23.16",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.23.16",
+      "trace_id": "GOV-002::bd-2gi.23.16",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-003",
+      "artifact_id": "bd-2gi.23.16",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.23.16",
+      "trace_id": "GOV-003::bd-2gi.23.16",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-001",
+      "artifact_id": "bd-2gi.23.17",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.23.17",
+      "trace_id": "GOV-001::bd-2gi.23.17",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-002",
+      "artifact_id": "bd-2gi.23.17",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.23.17",
+      "trace_id": "GOV-002::bd-2gi.23.17",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-003",
+      "artifact_id": "bd-2gi.23.17",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.23.17",
+      "trace_id": "GOV-003::bd-2gi.23.17",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-001",
+      "artifact_id": "bd-2gi.23.7",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.23.7",
+      "trace_id": "GOV-001::bd-2gi.23.7",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-002",
+      "artifact_id": "bd-2gi.23.7",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.23.7",
+      "trace_id": "GOV-002::bd-2gi.23.7",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-003",
+      "artifact_id": "bd-2gi.23.7",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.23.7",
+      "trace_id": "GOV-003::bd-2gi.23.7",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-001",
+      "artifact_id": "bd-2gi.23.8",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.23.8",
+      "trace_id": "GOV-001::bd-2gi.23.8",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-002",
+      "artifact_id": "bd-2gi.23.8",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.23.8",
+      "trace_id": "GOV-002::bd-2gi.23.8",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-003",
+      "artifact_id": "bd-2gi.23.8",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.23.8",
+      "trace_id": "GOV-003::bd-2gi.23.8",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-001",
+      "artifact_id": "bd-2gi.23.9",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.23.9",
+      "trace_id": "GOV-001::bd-2gi.23.9",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-002",
+      "artifact_id": "bd-2gi.23.9",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.23.9",
+      "trace_id": "GOV-002::bd-2gi.23.9",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-003",
+      "artifact_id": "bd-2gi.23.9",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.23.9",
+      "trace_id": "GOV-003::bd-2gi.23.9",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-001",
+      "artifact_id": "bd-2gi.27",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.27",
+      "trace_id": "GOV-001::bd-2gi.27",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-002",
+      "artifact_id": "bd-2gi.27",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.27",
+      "trace_id": "GOV-002::bd-2gi.27",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-003",
+      "artifact_id": "bd-2gi.27",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.27",
+      "trace_id": "GOV-003::bd-2gi.27",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-001",
+      "artifact_id": "bd-2gi.27.4",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.27.4",
+      "trace_id": "GOV-001::bd-2gi.27.4",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-002",
+      "artifact_id": "bd-2gi.27.4",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.27.4",
+      "trace_id": "GOV-002::bd-2gi.27.4",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-003",
+      "artifact_id": "bd-2gi.27.4",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.27.4",
+      "trace_id": "GOV-003::bd-2gi.27.4",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-001",
+      "artifact_id": "bd-2gi.27.5",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.27.5",
+      "trace_id": "GOV-001::bd-2gi.27.5",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-002",
+      "artifact_id": "bd-2gi.27.5",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.27.5",
+      "trace_id": "GOV-002::bd-2gi.27.5",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-003",
+      "artifact_id": "bd-2gi.27.5",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.27.5",
+      "trace_id": "GOV-003::bd-2gi.27.5",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-001",
+      "artifact_id": "bd-2gi.27.6",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.27.6",
+      "trace_id": "GOV-001::bd-2gi.27.6",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-002",
+      "artifact_id": "bd-2gi.27.6",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.27.6",
+      "trace_id": "GOV-002::bd-2gi.27.6",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-003",
+      "artifact_id": "bd-2gi.27.6",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.27.6",
+      "trace_id": "GOV-003::bd-2gi.27.6",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-001",
+      "artifact_id": "bd-2gi.27.7",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.27.7",
+      "trace_id": "GOV-001::bd-2gi.27.7",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-002",
+      "artifact_id": "bd-2gi.27.7",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.27.7",
+      "trace_id": "GOV-002::bd-2gi.27.7",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-003",
+      "artifact_id": "bd-2gi.27.7",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.27.7",
+      "trace_id": "GOV-003::bd-2gi.27.7",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-001",
+      "artifact_id": "bd-2gi.27.8",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.27.8",
+      "trace_id": "GOV-001::bd-2gi.27.8",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-002",
+      "artifact_id": "bd-2gi.27.8",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.27.8",
+      "trace_id": "GOV-002::bd-2gi.27.8",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-003",
+      "artifact_id": "bd-2gi.27.8",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.27.8",
+      "trace_id": "GOV-003::bd-2gi.27.8",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-001",
+      "artifact_id": "bd-2gi.27.9",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.27.9",
+      "trace_id": "GOV-001::bd-2gi.27.9",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-002",
+      "artifact_id": "bd-2gi.27.9",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.27.9",
+      "trace_id": "GOV-002::bd-2gi.27.9",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-003",
+      "artifact_id": "bd-2gi.27.9",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.27.9",
+      "trace_id": "GOV-003::bd-2gi.27.9",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-001",
+      "artifact_id": "bd-2gi.28",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.28",
+      "trace_id": "GOV-001::bd-2gi.28",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-002",
+      "artifact_id": "bd-2gi.28",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.28",
+      "trace_id": "GOV-002::bd-2gi.28",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-003",
+      "artifact_id": "bd-2gi.28",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.28",
+      "trace_id": "GOV-003::bd-2gi.28",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-001",
+      "artifact_id": "bd-2gi.28.3",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.28.3",
+      "trace_id": "GOV-001::bd-2gi.28.3",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-002",
+      "artifact_id": "bd-2gi.28.3",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.28.3",
+      "trace_id": "GOV-002::bd-2gi.28.3",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-003",
+      "artifact_id": "bd-2gi.28.3",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.28.3",
+      "trace_id": "GOV-003::bd-2gi.28.3",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-001",
+      "artifact_id": "bd-2gi.28.4",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.28.4",
+      "trace_id": "GOV-001::bd-2gi.28.4",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-002",
+      "artifact_id": "bd-2gi.28.4",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.28.4",
+      "trace_id": "GOV-002::bd-2gi.28.4",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-003",
+      "artifact_id": "bd-2gi.28.4",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.28.4",
+      "trace_id": "GOV-003::bd-2gi.28.4",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-001",
+      "artifact_id": "bd-2gi.28.5",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.28.5",
+      "trace_id": "GOV-001::bd-2gi.28.5",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-002",
+      "artifact_id": "bd-2gi.28.5",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.28.5",
+      "trace_id": "GOV-002::bd-2gi.28.5",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-003",
+      "artifact_id": "bd-2gi.28.5",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.28.5",
+      "trace_id": "GOV-003::bd-2gi.28.5",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-001",
+      "artifact_id": "bd-2gi.28.6",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.28.6",
+      "trace_id": "GOV-001::bd-2gi.28.6",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-002",
+      "artifact_id": "bd-2gi.28.6",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.28.6",
+      "trace_id": "GOV-002::bd-2gi.28.6",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-003",
+      "artifact_id": "bd-2gi.28.6",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.28.6",
+      "trace_id": "GOV-003::bd-2gi.28.6",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-001",
+      "artifact_id": "bd-2gi.28.7",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.28.7",
+      "trace_id": "GOV-001::bd-2gi.28.7",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-002",
+      "artifact_id": "bd-2gi.28.7",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.28.7",
+      "trace_id": "GOV-002::bd-2gi.28.7",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-003",
+      "artifact_id": "bd-2gi.28.7",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.28.7",
+      "trace_id": "GOV-003::bd-2gi.28.7",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-001",
+      "artifact_id": "bd-2gi.28.8",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.28.8",
+      "trace_id": "GOV-001::bd-2gi.28.8",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-002",
+      "artifact_id": "bd-2gi.28.8",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.28.8",
+      "trace_id": "GOV-002::bd-2gi.28.8",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-003",
+      "artifact_id": "bd-2gi.28.8",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.28.8",
+      "trace_id": "GOV-003::bd-2gi.28.8",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-001",
+      "artifact_id": "bd-2gi.28.9",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.28.9",
+      "trace_id": "GOV-001::bd-2gi.28.9",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-002",
+      "artifact_id": "bd-2gi.28.9",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.28.9",
+      "trace_id": "GOV-002::bd-2gi.28.9",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-003",
+      "artifact_id": "bd-2gi.28.9",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.28.9",
+      "trace_id": "GOV-003::bd-2gi.28.9",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-001",
+      "artifact_id": "bd-2gi.29",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.29",
+      "trace_id": "GOV-001::bd-2gi.29",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-002",
+      "artifact_id": "bd-2gi.29",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.29",
+      "trace_id": "GOV-002::bd-2gi.29",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-003",
+      "artifact_id": "bd-2gi.29",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.29",
+      "trace_id": "GOV-003::bd-2gi.29",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-001",
+      "artifact_id": "bd-2gi.29.1",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.29.1",
+      "trace_id": "GOV-001::bd-2gi.29.1",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-002",
+      "artifact_id": "bd-2gi.29.1",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.29.1",
+      "trace_id": "GOV-002::bd-2gi.29.1",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-003",
+      "artifact_id": "bd-2gi.29.1",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.29.1",
+      "trace_id": "GOV-003::bd-2gi.29.1",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-001",
+      "artifact_id": "bd-2gi.29.2",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.29.2",
+      "trace_id": "GOV-001::bd-2gi.29.2",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-002",
+      "artifact_id": "bd-2gi.29.2",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.29.2",
+      "trace_id": "GOV-002::bd-2gi.29.2",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-003",
+      "artifact_id": "bd-2gi.29.2",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.29.2",
+      "trace_id": "GOV-003::bd-2gi.29.2",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-001",
+      "artifact_id": "bd-2gi.29.3",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.29.3",
+      "trace_id": "GOV-001::bd-2gi.29.3",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-002",
+      "artifact_id": "bd-2gi.29.3",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.29.3",
+      "trace_id": "GOV-002::bd-2gi.29.3",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-003",
+      "artifact_id": "bd-2gi.29.3",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.29.3",
+      "trace_id": "GOV-003::bd-2gi.29.3",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-001",
+      "artifact_id": "bd-2gi.29.4",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.29.4",
+      "trace_id": "GOV-001::bd-2gi.29.4",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-002",
+      "artifact_id": "bd-2gi.29.4",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.29.4",
+      "trace_id": "GOV-002::bd-2gi.29.4",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-003",
+      "artifact_id": "bd-2gi.29.4",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.29.4",
+      "trace_id": "GOV-003::bd-2gi.29.4",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-001",
+      "artifact_id": "bd-2gi.29.5",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.29.5",
+      "trace_id": "GOV-001::bd-2gi.29.5",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-002",
+      "artifact_id": "bd-2gi.29.5",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.29.5",
+      "trace_id": "GOV-002::bd-2gi.29.5",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-003",
+      "artifact_id": "bd-2gi.29.5",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.29.5",
+      "trace_id": "GOV-003::bd-2gi.29.5",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-001",
+      "artifact_id": "bd-2gi.29.6",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.29.6",
+      "trace_id": "GOV-001::bd-2gi.29.6",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-002",
+      "artifact_id": "bd-2gi.29.6",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.29.6",
+      "trace_id": "GOV-002::bd-2gi.29.6",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-003",
+      "artifact_id": "bd-2gi.29.6",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.29.6",
+      "trace_id": "GOV-003::bd-2gi.29.6",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-001",
+      "artifact_id": "bd-2gi.29.7",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.29.7",
+      "trace_id": "GOV-001::bd-2gi.29.7",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-002",
+      "artifact_id": "bd-2gi.29.7",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.29.7",
+      "trace_id": "GOV-002::bd-2gi.29.7",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-003",
+      "artifact_id": "bd-2gi.29.7",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.29.7",
+      "trace_id": "GOV-003::bd-2gi.29.7",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-001",
+      "artifact_id": "bd-2gi.29.8",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.29.8",
+      "trace_id": "GOV-001::bd-2gi.29.8",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-002",
+      "artifact_id": "bd-2gi.29.8",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.29.8",
+      "trace_id": "GOV-002::bd-2gi.29.8",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-003",
+      "artifact_id": "bd-2gi.29.8",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.29.8",
+      "trace_id": "GOV-003::bd-2gi.29.8",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-001",
+      "artifact_id": "bd-2gi.29.9",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.29.9",
+      "trace_id": "GOV-001::bd-2gi.29.9",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-002",
+      "artifact_id": "bd-2gi.29.9",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.29.9",
+      "trace_id": "GOV-002::bd-2gi.29.9",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-003",
+      "artifact_id": "bd-2gi.29.9",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.29.9",
+      "trace_id": "GOV-003::bd-2gi.29.9",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-001",
+      "artifact_id": "bd-2gi.30",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.30",
+      "trace_id": "GOV-001::bd-2gi.30",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-002",
+      "artifact_id": "bd-2gi.30",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.30",
+      "trace_id": "GOV-002::bd-2gi.30",
+      "result": "fail",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-003",
+      "artifact_id": "bd-2gi.30",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2gi.30",
+      "trace_id": "GOV-003::bd-2gi.30",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-001",
+      "artifact_id": "bd-2t5e",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2t5e",
+      "trace_id": "GOV-001::bd-2t5e",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-002",
+      "artifact_id": "bd-2t5e",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2t5e",
+      "trace_id": "GOV-002::bd-2t5e",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    },
+    {
+      "rule_id": "GOV-003",
+      "artifact_id": "bd-2t5e",
+      "artifact_path": ".beads/issues.jsonl",
+      "bead_id": "bd-2t5e",
+      "trace_id": "GOV-003::bd-2t5e",
+      "result": "pass",
+      "repro_cmd": "./scripts/governance_gate_check.sh"
+    }
+  ]
+}
