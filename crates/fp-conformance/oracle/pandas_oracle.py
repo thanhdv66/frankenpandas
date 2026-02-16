@@ -273,6 +273,62 @@ def op_index_first_positions(pd, payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def op_series_loc(pd, payload: dict[str, Any]) -> dict[str, Any]:
+    left = payload.get("left")
+    loc_labels = payload.get("loc_labels")
+    if left is None:
+        raise OracleError("series_loc requires left payload")
+    if not isinstance(loc_labels, list):
+        raise OracleError("series_loc requires loc_labels list payload")
+
+    index = [label_from_json(item) for item in left["index"]]
+    values = [scalar_from_json(item) for item in left["values"]]
+    labels = [label_from_json(item) for item in loc_labels]
+
+    series = pd.Series(values, index=index, name=left.get("name", "series"))
+    try:
+        out = series.loc[labels]
+    except KeyError as exc:
+        raise OracleError(f"series_loc label lookup failed: {exc}") from exc
+
+    return {
+        "expected_series": {
+            "index": [label_to_json(v) for v in out.index.tolist()],
+            "values": [scalar_to_json(v) for v in out.tolist()],
+        }
+    }
+
+
+def op_series_iloc(pd, payload: dict[str, Any]) -> dict[str, Any]:
+    left = payload.get("left")
+    iloc_positions = payload.get("iloc_positions")
+    if left is None:
+        raise OracleError("series_iloc requires left payload")
+    if not isinstance(iloc_positions, list):
+        raise OracleError("series_iloc requires iloc_positions list payload")
+
+    index = [label_from_json(item) for item in left["index"]]
+    values = [scalar_from_json(item) for item in left["values"]]
+
+    try:
+        positions = [int(value) for value in iloc_positions]
+    except Exception as exc:  # pragma: no cover - defensive conversion
+        raise OracleError(f"series_iloc positions must be integers: {exc}") from exc
+
+    series = pd.Series(values, index=index, name=left.get("name", "series"))
+    try:
+        out = series.iloc[positions]
+    except IndexError as exc:
+        raise OracleError(f"series_iloc position lookup failed: {exc}") from exc
+
+    return {
+        "expected_series": {
+            "index": [label_to_json(v) for v in out.index.tolist()],
+            "values": [scalar_to_json(v) for v in out.tolist()],
+        }
+    }
+
+
 def dispatch(pd, payload: dict[str, Any]) -> dict[str, Any]:
     op = payload.get("operation")
     if op == "series_add":
@@ -287,6 +343,10 @@ def dispatch(pd, payload: dict[str, Any]) -> dict[str, Any]:
         return op_index_has_duplicates(pd, payload)
     if op == "index_first_positions":
         return op_index_first_positions(pd, payload)
+    if op == "series_loc":
+        return op_series_loc(pd, payload)
+    if op == "series_iloc":
+        return op_series_iloc(pd, payload)
     raise OracleError(f"unsupported operation: {op!r}")
 
 

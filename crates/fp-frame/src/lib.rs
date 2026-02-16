@@ -374,6 +374,57 @@ impl Series {
         Self::from_values(self.name.clone(), new_labels, new_values)
     }
 
+    /// Label-based selection for a list of labels.
+    ///
+    /// Matches `series.loc[[...]]` for list-like selectors. Labels are returned
+    /// in selector order and duplicate labels in the selector are preserved.
+    /// If a requested label does not exist, this fails closed.
+    pub fn loc(&self, labels: &[IndexLabel]) -> Result<Self, FrameError> {
+        let mut out_labels = Vec::new();
+        let mut out_values = Vec::new();
+
+        for requested in labels {
+            let mut found = false;
+            for (position, actual) in self.index.labels().iter().enumerate() {
+                if actual == requested {
+                    out_labels.push(actual.clone());
+                    out_values.push(self.column.values()[position].clone());
+                    found = true;
+                }
+            }
+
+            if !found {
+                return Err(FrameError::CompatibilityRejected(format!(
+                    "loc label not found: {requested:?}"
+                )));
+            }
+        }
+
+        Self::from_values(self.name.clone(), out_labels, out_values)
+    }
+
+    /// Position-based selection for a list of integer positions.
+    ///
+    /// Matches `series.iloc[[...]]` for list-like selectors.
+    /// Positions are returned in selector order and duplicates are preserved.
+    pub fn iloc(&self, positions: &[usize]) -> Result<Self, FrameError> {
+        let mut out_labels = Vec::with_capacity(positions.len());
+        let mut out_values = Vec::with_capacity(positions.len());
+
+        for &position in positions {
+            if position >= self.len() {
+                return Err(FrameError::CompatibilityRejected(format!(
+                    "iloc position {position} out of bounds for length {}",
+                    self.len()
+                )));
+            }
+            out_labels.push(self.index.labels()[position].clone());
+            out_values.push(self.column.values()[position].clone());
+        }
+
+        Self::from_values(self.name.clone(), out_labels, out_values)
+    }
+
     // --- Missing Data Operations ---
 
     /// Fill missing values with a scalar.
@@ -2257,6 +2308,84 @@ mod tests {
             Scalar::Float64(v) => assert!(v.is_nan()),
             _ => panic!("expected NaN"),
         }
+    }
+
+    #[test]
+    fn series_loc_selects_labels_in_request_order_with_duplicates() {
+        let s = Series::from_values(
+            "vals",
+            vec!["a".into(), "b".into(), "c".into()],
+            vec![Scalar::Int64(10), Scalar::Int64(20), Scalar::Int64(30)],
+        )
+        .unwrap();
+
+        let selected = s.loc(&["c".into(), "a".into(), "c".into()]).unwrap();
+        assert_eq!(
+            selected.index().labels(),
+            &[
+                IndexLabel::from("c"),
+                IndexLabel::from("a"),
+                IndexLabel::from("c")
+            ]
+        );
+        assert_eq!(
+            selected.values(),
+            &[Scalar::Int64(30), Scalar::Int64(10), Scalar::Int64(30)]
+        );
+    }
+
+    #[test]
+    fn series_loc_missing_label_is_rejected() {
+        let s = Series::from_values(
+            "vals",
+            vec!["a".into(), "b".into()],
+            vec![Scalar::Int64(1), Scalar::Int64(2)],
+        )
+        .unwrap();
+
+        let err = s.loc(&["z".into()]).unwrap_err();
+        assert!(
+            matches!(err, FrameError::CompatibilityRejected(msg) if msg.contains("loc label not found"))
+        );
+    }
+
+    #[test]
+    fn series_iloc_selects_positions_in_request_order_with_duplicates() {
+        let s = Series::from_values(
+            "vals",
+            vec![0_i64.into(), 1_i64.into(), 2_i64.into()],
+            vec![Scalar::Int64(100), Scalar::Int64(200), Scalar::Int64(300)],
+        )
+        .unwrap();
+
+        let selected = s.iloc(&[2, 0, 2]).unwrap();
+        assert_eq!(
+            selected.index().labels(),
+            &[
+                IndexLabel::from(2_i64),
+                IndexLabel::from(0_i64),
+                IndexLabel::from(2_i64)
+            ]
+        );
+        assert_eq!(
+            selected.values(),
+            &[Scalar::Int64(300), Scalar::Int64(100), Scalar::Int64(300)]
+        );
+    }
+
+    #[test]
+    fn series_iloc_out_of_bounds_is_rejected() {
+        let s = Series::from_values(
+            "vals",
+            vec![0_i64.into(), 1_i64.into()],
+            vec![Scalar::Int64(10), Scalar::Int64(20)],
+        )
+        .unwrap();
+
+        let err = s.iloc(&[2]).unwrap_err();
+        assert!(
+            matches!(err, FrameError::CompatibilityRejected(msg) if msg.contains("out of bounds"))
+        );
     }
 
     // ---- DataFrame filter_rows, head, tail, with_column, drop_column, rename tests ----

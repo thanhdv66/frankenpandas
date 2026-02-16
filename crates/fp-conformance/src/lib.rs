@@ -148,6 +148,8 @@ pub enum FixtureOperation {
     // FP-P2C-010: loc/iloc
     SeriesFilter,
     SeriesHead,
+    SeriesLoc,
+    SeriesIloc,
     // FP-P2C-011: Full GroupBy aggregate matrix
     #[serde(rename = "groupby_mean", alias = "group_by_mean")]
     GroupByMean,
@@ -242,6 +244,10 @@ pub struct PacketFixture {
     pub head_n: Option<usize>,
     #[serde(default)]
     pub csv_input: Option<String>,
+    #[serde(default)]
+    pub loc_labels: Option<Vec<IndexLabel>>,
+    #[serde(default)]
+    pub iloc_positions: Option<Vec<usize>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -429,7 +435,10 @@ fn compat_contract_rows_for_operation(operation: FixtureOperation) -> &'static [
         FixtureOperation::FillNa | FixtureOperation::DropNa => &["CC-002", "CC-005"],
         FixtureOperation::CsvRoundTrip => &["CC-006"],
         FixtureOperation::ColumnDtypeCheck => &["CC-001"],
-        FixtureOperation::SeriesFilter | FixtureOperation::SeriesHead => &["CC-004"],
+        FixtureOperation::SeriesFilter
+        | FixtureOperation::SeriesHead
+        | FixtureOperation::SeriesLoc
+        | FixtureOperation::SeriesIloc => &["CC-004"],
     }
 }
 
@@ -889,6 +898,10 @@ struct OracleRequest {
     head_n: Option<usize>,
     #[serde(default)]
     csv_input: Option<String>,
+    #[serde(default)]
+    loc_labels: Option<Vec<IndexLabel>>,
+    #[serde(default)]
+    iloc_positions: Option<Vec<usize>>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -2911,6 +2924,28 @@ fn run_fixture_operation(
             };
             compare_series_expected(&actual, &expected)
         }
+        FixtureOperation::SeriesLoc => {
+            let left = require_left_series(fixture)?;
+            let labels = require_loc_labels(fixture)?;
+            let series = build_series(left)?;
+            let actual = series.loc(labels).map_err(|err| err.to_string())?;
+            let expected = match expected {
+                ResolvedExpected::Series(series) => series,
+                _ => return Err("expected_series is required for series_loc".to_owned()),
+            };
+            compare_series_expected(&actual, &expected)
+        }
+        FixtureOperation::SeriesIloc => {
+            let left = require_left_series(fixture)?;
+            let positions = require_iloc_positions(fixture)?;
+            let series = build_series(left)?;
+            let actual = series.iloc(positions).map_err(|err| err.to_string())?;
+            let expected = match expected {
+                ResolvedExpected::Series(series) => series,
+                _ => return Err("expected_series is required for series_iloc".to_owned()),
+            };
+            compare_series_expected(&actual, &expected)
+        }
         FixtureOperation::GroupByMean => {
             let keys = require_left_series(fixture)?;
             let values = require_right_series(fixture)?;
@@ -3035,6 +3070,8 @@ fn fixture_expected(fixture: &PacketFixture) -> Result<ResolvedExpected, Harness
         | FixtureOperation::DropNa
         | FixtureOperation::SeriesFilter
         | FixtureOperation::SeriesHead
+        | FixtureOperation::SeriesLoc
+        | FixtureOperation::SeriesIloc
         | FixtureOperation::GroupByMean
         | FixtureOperation::GroupByCount => fixture
             .expected_series
@@ -3105,6 +3142,8 @@ fn capture_live_oracle_expected(
         fill_value: fixture.fill_value.clone(),
         head_n: fixture.head_n,
         csv_input: fixture.csv_input.clone(),
+        loc_labels: fixture.loc_labels.clone(),
+        iloc_positions: fixture.iloc_positions.clone(),
     };
     let input = serde_json::to_vec(&payload)?;
 
@@ -3188,6 +3227,8 @@ fn capture_live_oracle_expected(
         | FixtureOperation::DropNa
         | FixtureOperation::SeriesFilter
         | FixtureOperation::SeriesHead
+        | FixtureOperation::SeriesLoc
+        | FixtureOperation::SeriesIloc
         | FixtureOperation::GroupByMean
         | FixtureOperation::GroupByCount => response
             .expected_series
@@ -3237,6 +3278,20 @@ fn require_join_type(fixture: &PacketFixture) -> Result<FixtureJoinType, String>
     fixture
         .join_type
         .ok_or_else(|| "missing join_type for join fixture".to_owned())
+}
+
+fn require_loc_labels(fixture: &PacketFixture) -> Result<&Vec<IndexLabel>, String> {
+    fixture
+        .loc_labels
+        .as_ref()
+        .ok_or_else(|| "loc_labels is required for series_loc".to_owned())
+}
+
+fn require_iloc_positions(fixture: &PacketFixture) -> Result<&Vec<usize>, String> {
+    fixture
+        .iloc_positions
+        .as_ref()
+        .ok_or_else(|| "iloc_positions is required for series_iloc".to_owned())
 }
 
 fn build_series(series: &FixtureSeries) -> Result<Series, String> {
@@ -3641,6 +3696,28 @@ fn execute_and_compare_differential(
             let expected = match expected {
                 ResolvedExpected::Series(s) => s,
                 _ => return Err("expected_series required for series_head".to_owned()),
+            };
+            Ok(diff_series(&actual, &expected))
+        }
+        FixtureOperation::SeriesLoc => {
+            let left = require_left_series(fixture)?;
+            let labels = require_loc_labels(fixture)?;
+            let series = build_series(left)?;
+            let actual = series.loc(labels).map_err(|err| err.to_string())?;
+            let expected = match expected {
+                ResolvedExpected::Series(s) => s,
+                _ => return Err("expected_series required for series_loc".to_owned()),
+            };
+            Ok(diff_series(&actual, &expected))
+        }
+        FixtureOperation::SeriesIloc => {
+            let left = require_left_series(fixture)?;
+            let positions = require_iloc_positions(fixture)?;
+            let series = build_series(left)?;
+            let actual = series.iloc(positions).map_err(|err| err.to_string())?;
+            let expected = match expected {
+                ResolvedExpected::Series(s) => s,
+                _ => return Err("expected_series required for series_iloc".to_owned()),
             };
             Ok(diff_series(&actual, &expected))
         }
