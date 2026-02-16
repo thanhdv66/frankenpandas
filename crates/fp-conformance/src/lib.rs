@@ -18,8 +18,8 @@ use fp_runtime::asupersync::{
     RuntimeAsupersyncConfig,
 };
 use fp_runtime::{
-    DecisionAction, DecodeProof, EvidenceLedger, RaptorQEnvelope, RaptorQMetadata, RuntimeMode,
-    RuntimePolicy, ScrubStatus,
+    DecisionAction, DecodeProof, EvidenceLedger, MAX_DECODE_PROOFS, RaptorQEnvelope,
+    RaptorQMetadata, RuntimeMode, RuntimePolicy, ScrubStatus,
 };
 use fp_types::{Scalar, dropna, fill_na, nansum};
 use raptorq::{Decoder, Encoder, EncodingPacket, ObjectTransmissionInformation};
@@ -1404,7 +1404,9 @@ pub fn write_packet_artifacts(
         8,
     )?;
     let decode_proof = run_raptorq_decode_recovery_drill(&sidecar, &report_bytes)?;
-    sidecar.envelope.decode_proofs = vec![decode_proof.clone()];
+    sidecar
+        .envelope
+        .push_decode_proof_capped(decode_proof.clone());
     sidecar.envelope.scrub = ScrubStatus {
         last_ok_unix_ms: sidecar.scrub_report.verified_at_unix_ms,
         status: if sidecar.scrub_report.source_hash_verified {
@@ -2006,6 +2008,21 @@ pub fn verify_packet_sidecar_integrity(
             return result;
         }
     };
+
+    if sidecar.envelope.decode_proofs.len() > MAX_DECODE_PROOFS {
+        result.errors.push(format!(
+            "{packet_id}: sidecar envelope decode_proofs exceeds cap {MAX_DECODE_PROOFS} (found {})",
+            sidecar.envelope.decode_proofs.len()
+        ));
+        return result;
+    }
+    if proof.decode_proofs.len() > MAX_DECODE_PROOFS {
+        result.errors.push(format!(
+            "{packet_id}: decode proof artifact exceeds cap {MAX_DECODE_PROOFS} (found {})",
+            proof.decode_proofs.len()
+        ));
+        return result;
+    }
 
     // Verify source hash matches (sidecar.source_hash == SHA-256 of parity_report.json)
     let actual_hash = hash_bytes(&report_bytes);
@@ -7611,7 +7628,7 @@ mod tests {
                 .expect("sidecar");
         let proof =
             run_raptorq_decode_recovery_drill(&sidecar, report_bytes).expect("decode drill");
-        sidecar.envelope.decode_proofs = vec![proof.clone()];
+        sidecar.envelope.push_decode_proof_capped(proof.clone());
         sidecar.envelope.scrub.status = "ok".to_owned();
         fs::write(
             dir.path().join("parity_report.raptorq.json"),
@@ -7668,7 +7685,7 @@ mod tests {
                 .expect("sidecar");
         let proof =
             run_raptorq_decode_recovery_drill(&sidecar, report_bytes).expect("decode drill");
-        sidecar.envelope.decode_proofs = vec![proof.clone()];
+        sidecar.envelope.push_decode_proof_capped(proof.clone());
         sidecar.envelope.scrub.status = "ok".to_owned();
         fs::write(
             dir.path().join("parity_report.raptorq.json"),
@@ -7698,6 +7715,61 @@ mod tests {
                 .iter()
                 .any(|entry| entry.contains("proof hash mismatch")),
             "expected proof hash mismatch error, got {:?}",
+            result.errors
+        );
+    }
+
+    #[test]
+    fn sidecar_integrity_fails_when_decode_proof_count_exceeds_cap() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let packet_id = "FP-P2C-099";
+
+        let report_bytes = br#"{"suite":"test","passed":1,"failed":0}"#;
+        fs::write(dir.path().join("parity_report.json"), report_bytes).expect("write report");
+
+        let mut sidecar =
+            generate_raptorq_sidecar("FP-P2C-099/parity_report", "conformance", report_bytes, 8)
+                .expect("sidecar");
+        sidecar.envelope.decode_proofs = (0..=fp_runtime::MAX_DECODE_PROOFS)
+            .map(|idx| fp_runtime::DecodeProof {
+                ts_unix_ms: u64::try_from(idx).expect("idx fits in u64"),
+                reason: format!("overflow-{idx}"),
+                recovered_blocks: u32::try_from(idx).expect("idx fits in u32"),
+                proof_hash: format!("sha256:{idx:08x}"),
+            })
+            .collect();
+        sidecar.envelope.scrub.status = "ok".to_owned();
+        fs::write(
+            dir.path().join("parity_report.raptorq.json"),
+            serde_json::to_string_pretty(&sidecar).expect("serialize sidecar"),
+        )
+        .expect("write sidecar");
+
+        let decode_artifact = DecodeProofArtifact {
+            packet_id: packet_id.to_owned(),
+            decode_proofs: vec![fp_runtime::DecodeProof {
+                ts_unix_ms: 1,
+                reason: "single-proof".to_owned(),
+                recovered_blocks: 1,
+                proof_hash: "sha256:00000001".to_owned(),
+            }],
+            status: DecodeProofStatus::Recovered,
+        };
+        fs::write(
+            dir.path().join("parity_report.decode_proof.json"),
+            serde_json::to_string_pretty(&decode_artifact).expect("serialize decode artifact"),
+        )
+        .expect("write decode artifact");
+
+        let result = verify_packet_sidecar_integrity(dir.path(), packet_id);
+        assert!(!result.is_ok());
+        assert!(!result.decode_proof_valid);
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|entry| entry.contains("decode_proofs exceeds cap")),
+            "expected decode proof cap error, got {:?}",
             result.errors
         );
     }

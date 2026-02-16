@@ -377,6 +377,8 @@ pub struct RaptorQEnvelope {
     pub decode_proofs: Vec<DecodeProof>,
 }
 
+pub const MAX_DECODE_PROOFS: usize = 1_000;
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RaptorQMetadata {
     pub k: u32,
@@ -418,6 +420,17 @@ impl RaptorQEnvelope {
             },
             decode_proofs: Vec::new(),
         }
+    }
+
+    /// Append a decode proof while enforcing a bounded history size.
+    ///
+    /// When the cap is exceeded, oldest proofs are evicted first.
+    pub fn push_decode_proof_capped(&mut self, proof: DecodeProof) {
+        if self.decode_proofs.len() >= MAX_DECODE_PROOFS {
+            let overflow = self.decode_proofs.len() + 1 - MAX_DECODE_PROOFS;
+            self.decode_proofs.drain(0..overflow);
+        }
+        self.decode_proofs.push(proof);
     }
 }
 
@@ -1075,6 +1088,35 @@ mod tests {
         assert_eq!(envelope.artifact_id, "packet-001");
         assert_eq!(envelope.artifact_type, "conformance");
         assert_eq!(envelope.scrub.status, "placeholder");
+    }
+
+    #[test]
+    fn decode_proof_append_is_capped_and_evicts_oldest() {
+        let mut envelope = RaptorQEnvelope::placeholder("packet-001", "conformance");
+        let total = super::MAX_DECODE_PROOFS + 5;
+
+        for idx in 0..total {
+            envelope.push_decode_proof_capped(super::DecodeProof {
+                ts_unix_ms: u64::try_from(idx).expect("idx within u64 range"),
+                reason: format!("proof-{idx}"),
+                recovered_blocks: u32::try_from(idx).expect("idx within u32 range"),
+                proof_hash: format!("sha256:{idx:08x}"),
+            });
+        }
+
+        assert_eq!(envelope.decode_proofs.len(), super::MAX_DECODE_PROOFS);
+        assert_eq!(
+            envelope.decode_proofs[0].proof_hash,
+            format!("sha256:{:08x}", total - super::MAX_DECODE_PROOFS)
+        );
+        assert_eq!(
+            envelope
+                .decode_proofs
+                .last()
+                .expect("decode proof should exist")
+                .proof_hash,
+            format!("sha256:{:08x}", total - 1)
+        );
     }
 
     #[test]
