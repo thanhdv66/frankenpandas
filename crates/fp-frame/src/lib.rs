@@ -913,6 +913,71 @@ impl DataFrame {
         Self::new(Index::new(labels), columns)
     }
 
+    /// Label-based row selection for list-like indexers.
+    ///
+    /// Matches `df.loc[[...]]` for list selectors. Requested labels are
+    /// returned in selector order and duplicate labels are preserved.
+    /// Missing labels fail closed.
+    pub fn loc(&self, labels: &[IndexLabel]) -> Result<Self, FrameError> {
+        let mut positions = Vec::new();
+        let mut out_labels = Vec::new();
+
+        for requested in labels {
+            let mut found = false;
+            for (position, actual) in self.index.labels().iter().enumerate() {
+                if actual == requested {
+                    positions.push(position);
+                    out_labels.push(actual.clone());
+                    found = true;
+                }
+            }
+            if !found {
+                return Err(FrameError::CompatibilityRejected(format!(
+                    "loc label not found: {requested:?}"
+                )));
+            }
+        }
+
+        let mut columns = BTreeMap::new();
+        for (name, column) in &self.columns {
+            let mut values = Vec::with_capacity(positions.len());
+            for &position in &positions {
+                values.push(column.values()[position].clone());
+            }
+            columns.insert(name.clone(), Column::from_values(values)?);
+        }
+
+        Self::new(Index::new(out_labels), columns)
+    }
+
+    /// Position-based row selection for list-like indexers.
+    ///
+    /// Matches `df.iloc[[...]]` for list selectors. Requested positions are
+    /// returned in selector order and duplicates are preserved.
+    pub fn iloc(&self, positions: &[usize]) -> Result<Self, FrameError> {
+        let mut out_labels = Vec::with_capacity(positions.len());
+        for &position in positions {
+            if position >= self.len() {
+                return Err(FrameError::CompatibilityRejected(format!(
+                    "iloc position {position} out of bounds for length {}",
+                    self.len()
+                )));
+            }
+            out_labels.push(self.index.labels()[position].clone());
+        }
+
+        let mut columns = BTreeMap::new();
+        for (name, column) in &self.columns {
+            let mut values = Vec::with_capacity(positions.len());
+            for &position in positions {
+                values.push(column.values()[position].clone());
+            }
+            columns.insert(name.clone(), Column::from_values(values)?);
+        }
+
+        Self::new(Index::new(out_labels), columns)
+    }
+
     /// Add or replace a column.
     ///
     /// Matches `df['new_col'] = values`.
@@ -2455,6 +2520,116 @@ mod tests {
         assert_eq!(
             tail.column("v").unwrap().values(),
             &[Scalar::Int64(4), Scalar::Int64(5)]
+        );
+    }
+
+    #[test]
+    fn dataframe_loc_selects_labels_in_request_order_with_duplicates() {
+        let df = DataFrame::from_dict_with_index(
+            vec![
+                (
+                    "a",
+                    vec![Scalar::Int64(10), Scalar::Int64(20), Scalar::Int64(30)],
+                ),
+                (
+                    "b",
+                    vec![Scalar::Int64(100), Scalar::Int64(200), Scalar::Int64(300)],
+                ),
+            ],
+            vec!["x".into(), "y".into(), "z".into()],
+        )
+        .unwrap();
+
+        let selected = df.loc(&["z".into(), "x".into(), "z".into()]).unwrap();
+        assert_eq!(
+            selected.index().labels(),
+            &[
+                IndexLabel::from("z"),
+                IndexLabel::from("x"),
+                IndexLabel::from("z")
+            ]
+        );
+        assert_eq!(
+            selected.column("a").unwrap().values(),
+            &[Scalar::Int64(30), Scalar::Int64(10), Scalar::Int64(30)]
+        );
+        assert_eq!(
+            selected.column("b").unwrap().values(),
+            &[Scalar::Int64(300), Scalar::Int64(100), Scalar::Int64(300)]
+        );
+    }
+
+    #[test]
+    fn dataframe_loc_missing_label_is_rejected() {
+        let df = DataFrame::from_dict_with_index(
+            vec![("a", vec![Scalar::Int64(1), Scalar::Int64(2)])],
+            vec!["x".into(), "y".into()],
+        )
+        .unwrap();
+
+        let err = df.loc(&["missing".into()]).unwrap_err();
+        assert!(
+            matches!(err, FrameError::CompatibilityRejected(msg) if msg.contains("loc label not found"))
+        );
+    }
+
+    #[test]
+    fn dataframe_iloc_selects_positions_in_request_order_with_duplicates() {
+        let df = DataFrame::from_dict_with_index(
+            vec![
+                (
+                    "a",
+                    vec![
+                        Scalar::Int64(1000),
+                        Scalar::Int64(1100),
+                        Scalar::Int64(1200),
+                        Scalar::Int64(1300),
+                    ],
+                ),
+                (
+                    "b",
+                    vec![
+                        Scalar::Int64(2000),
+                        Scalar::Int64(2100),
+                        Scalar::Int64(2200),
+                        Scalar::Int64(2300),
+                    ],
+                ),
+            ],
+            vec![
+                IndexLabel::from(10_i64),
+                IndexLabel::from(11_i64),
+                IndexLabel::from(12_i64),
+                IndexLabel::from(13_i64),
+            ],
+        )
+        .unwrap();
+
+        let selected = df.iloc(&[3, 1, 3]).unwrap();
+        assert_eq!(
+            selected.index().labels(),
+            &[
+                IndexLabel::from(13_i64),
+                IndexLabel::from(11_i64),
+                IndexLabel::from(13_i64)
+            ]
+        );
+        assert_eq!(
+            selected.column("a").unwrap().values(),
+            &[Scalar::Int64(1300), Scalar::Int64(1100), Scalar::Int64(1300)]
+        );
+        assert_eq!(
+            selected.column("b").unwrap().values(),
+            &[Scalar::Int64(2300), Scalar::Int64(2100), Scalar::Int64(2300)]
+        );
+    }
+
+    #[test]
+    fn dataframe_iloc_out_of_bounds_is_rejected() {
+        let df = DataFrame::from_dict(&["a"], vec![("a", vec![Scalar::Int64(10)])]).unwrap();
+        let err = df.iloc(&[1]).unwrap_err();
+        assert!(
+            matches!(err, FrameError::CompatibilityRejected(msg) if msg.contains("out of bounds"))
         );
     }
 
