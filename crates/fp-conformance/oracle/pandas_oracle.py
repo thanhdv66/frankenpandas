@@ -11,6 +11,7 @@ This script is strict by default when --strict-legacy is provided:
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import math
 import os
@@ -44,6 +45,14 @@ def parse_args() -> argparse.Namespace:
 
 
 def setup_pandas(args: argparse.Namespace):
+    def validate_pandas_module(pd_mod: Any) -> None:
+        required_attrs = ("Series", "DataFrame", "Index")
+        missing = [name for name in required_attrs if not hasattr(pd_mod, name)]
+        if missing:
+            raise OracleError(
+                f"imported pandas module missing required attributes: {', '.join(missing)}"
+            )
+
     legacy_root = os.path.abspath(args.legacy_root)
     candidate_parent = os.path.dirname(legacy_root)
     if os.path.isdir(candidate_parent):
@@ -52,6 +61,7 @@ def setup_pandas(args: argparse.Namespace):
     try:
         import pandas as pd  # type: ignore
 
+        validate_pandas_module(pd)
         return pd
     except Exception as exc:
         if args.strict_legacy and not args.allow_system_pandas_fallback:
@@ -60,8 +70,13 @@ def setup_pandas(args: argparse.Namespace):
             ) from exc
 
         try:
-            import pandas as pd  # type: ignore
+            # Remove legacy path and cached module, then resolve system pandas.
+            while candidate_parent in sys.path:
+                sys.path.remove(candidate_parent)
+            sys.modules.pop("pandas", None)
+            pd = importlib.import_module("pandas")
 
+            validate_pandas_module(pd)
             return pd
         except Exception as fallback_exc:
             raise OracleError(f"system pandas import failed: {fallback_exc}") from fallback_exc
@@ -329,6 +344,60 @@ def op_series_iloc(pd, payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def op_series_filter(pd, payload: dict[str, Any]) -> dict[str, Any]:
+    left = payload.get("left")
+    right = payload.get("right")
+    if left is None or right is None:
+        raise OracleError("series_filter requires left(data) and right(mask) payloads")
+
+    data_index = [label_from_json(item) for item in left["index"]]
+    data_values = [scalar_from_json(item) for item in left["values"]]
+    mask_index = [label_from_json(item) for item in right["index"]]
+    mask_values = [scalar_from_json(item) for item in right["values"]]
+
+    data = pd.Series(data_values, index=data_index, name=left.get("name", "data"))
+    mask = pd.Series(mask_values, index=mask_index, name=right.get("name", "mask"))
+
+    try:
+        out = data[mask]
+    except Exception as exc:
+        raise OracleError(f"series_filter mask application failed: {exc}") from exc
+
+    return {
+        "expected_series": {
+            "index": [label_to_json(v) for v in out.index.tolist()],
+            "values": [scalar_to_json(v) for v in out.tolist()],
+        }
+    }
+
+
+def op_series_head(pd, payload: dict[str, Any]) -> dict[str, Any]:
+    left = payload.get("left")
+    head_n = payload.get("head_n")
+    if left is None:
+        raise OracleError("series_head requires left payload")
+    if head_n is None:
+        raise OracleError("series_head requires head_n payload")
+
+    index = [label_from_json(item) for item in left["index"]]
+    values = [scalar_from_json(item) for item in left["values"]]
+
+    try:
+        n = int(head_n)
+    except Exception as exc:  # pragma: no cover - defensive conversion
+        raise OracleError(f"series_head head_n must be an integer: {exc}") from exc
+
+    series = pd.Series(values, index=index, name=left.get("name", "series"))
+    out = series.head(n)
+
+    return {
+        "expected_series": {
+            "index": [label_to_json(v) for v in out.index.tolist()],
+            "values": [scalar_to_json(v) for v in out.tolist()],
+        }
+    }
+
+
 def dataframe_from_json(pd, payload: dict[str, Any]):
     index_raw = payload.get("index")
     columns_raw = payload.get("columns")
@@ -421,6 +490,10 @@ def dispatch(pd, payload: dict[str, Any]) -> dict[str, Any]:
         return op_series_loc(pd, payload)
     if op == "series_iloc":
         return op_series_iloc(pd, payload)
+    if op == "series_filter":
+        return op_series_filter(pd, payload)
+    if op == "series_head":
+        return op_series_head(pd, payload)
     if op == "dataframe_loc":
         return op_dataframe_loc(pd, payload)
     if op == "dataframe_iloc":
