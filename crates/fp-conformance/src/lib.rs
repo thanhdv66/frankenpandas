@@ -249,6 +249,8 @@ pub struct PacketFixture {
     #[serde(default)]
     pub expected_frame: Option<FixtureExpectedDataFrame>,
     #[serde(default)]
+    pub expected_error_contains: Option<String>,
+    #[serde(default)]
     pub expected_alignment: Option<FixtureExpectedAlignment>,
     #[serde(default)]
     pub expected_bool: Option<bool>,
@@ -954,6 +956,8 @@ enum ResolvedExpected {
     Series(FixtureExpectedSeries),
     Join(FixtureExpectedJoin),
     Frame(FixtureExpectedDataFrame),
+    ErrorContains(String),
+    ErrorAny,
     Alignment(FixtureExpectedAlignment),
     Bool(bool),
     Positions(Vec<Option<usize>>),
@@ -2976,23 +2980,57 @@ fn run_fixture_operation(
             let frame = require_frame(fixture)?;
             let labels = require_loc_labels(fixture)?;
             let frame = build_dataframe(frame)?;
-            let actual = frame.loc(labels).map_err(|err| err.to_string())?;
-            let expected = match expected {
-                ResolvedExpected::Frame(frame) => frame,
-                _ => return Err("expected_frame is required for dataframe_loc".to_owned()),
-            };
-            compare_dataframe_expected(&actual, &expected)
+            let actual = frame.loc(labels).map_err(|err| err.to_string());
+            match expected {
+                ResolvedExpected::Frame(frame) => compare_dataframe_expected(&actual?, &frame),
+                ResolvedExpected::ErrorContains(substr) => match actual {
+                    Err(message) if message.contains(&substr) => Ok(()),
+                    Err(message) => Err(format!(
+                        "expected dataframe_loc error containing '{substr}', got '{message}'"
+                    )),
+                    Ok(_) => Err(format!(
+                        "expected dataframe_loc to fail with error containing '{substr}'"
+                    )),
+                },
+                ResolvedExpected::ErrorAny => {
+                    if actual.is_err() {
+                        Ok(())
+                    } else {
+                        Err("expected dataframe_loc to fail but operation succeeded".to_owned())
+                    }
+                }
+                _ => {
+                    Err("expected_frame or expected_error is required for dataframe_loc".to_owned())
+                }
+            }
         }
         FixtureOperation::DataFrameIloc => {
             let frame = require_frame(fixture)?;
             let positions = require_iloc_positions(fixture)?;
             let frame = build_dataframe(frame)?;
-            let actual = frame.iloc(positions).map_err(|err| err.to_string())?;
-            let expected = match expected {
-                ResolvedExpected::Frame(frame) => frame,
-                _ => return Err("expected_frame is required for dataframe_iloc".to_owned()),
-            };
-            compare_dataframe_expected(&actual, &expected)
+            let actual = frame.iloc(positions).map_err(|err| err.to_string());
+            match expected {
+                ResolvedExpected::Frame(frame) => compare_dataframe_expected(&actual?, &frame),
+                ResolvedExpected::ErrorContains(substr) => match actual {
+                    Err(message) if message.contains(&substr) => Ok(()),
+                    Err(message) => Err(format!(
+                        "expected dataframe_iloc error containing '{substr}', got '{message}'"
+                    )),
+                    Ok(_) => Err(format!(
+                        "expected dataframe_iloc to fail with error containing '{substr}'"
+                    )),
+                },
+                ResolvedExpected::ErrorAny => {
+                    if actual.is_err() {
+                        Ok(())
+                    } else {
+                        Err("expected dataframe_iloc to fail but operation succeeded".to_owned())
+                    }
+                }
+                _ => Err(
+                    "expected_frame or expected_error is required for dataframe_iloc".to_owned(),
+                ),
+            }
         }
         FixtureOperation::GroupByMean => {
             let keys = require_left_series(fixture)?;
@@ -3053,6 +3091,10 @@ fn resolve_expected(
 }
 
 fn fixture_expected(fixture: &PacketFixture) -> Result<ResolvedExpected, HarnessError> {
+    if let Some(expected_error_contains) = fixture.expected_error_contains.clone() {
+        return Ok(ResolvedExpected::ErrorContains(expected_error_contains));
+    }
+
     match fixture.operation {
         FixtureOperation::SeriesAdd => fixture
             .expected_series
@@ -3177,6 +3219,8 @@ fn capture_live_oracle_expected(
     config: &HarnessConfig,
     fixture: &PacketFixture,
 ) -> Result<ResolvedExpected, HarnessError> {
+    let expects_error = fixture.expected_error_contains.is_some();
+
     if !config.oracle_root.exists() {
         return Err(HarnessError::OracleUnavailable(format!(
             "legacy oracle root does not exist: {}",
@@ -3229,11 +3273,16 @@ fn capture_live_oracle_expected(
         })?;
 
     if !output.status.success() {
+        if expects_error {
+            return Ok(ResolvedExpected::ErrorAny);
+        }
+
         if let Ok(response) = serde_json::from_slice::<OracleResponse>(&output.stdout)
             && let Some(error) = response.error
         {
             return Err(HarnessError::OracleUnavailable(error));
         }
+
         let code = output.status.code().unwrap_or(-1);
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
@@ -3245,7 +3294,17 @@ fn capture_live_oracle_expected(
 
     let response: OracleResponse = serde_json::from_slice(&output.stdout)?;
     if let Some(error) = response.error {
+        if expects_error {
+            return Ok(ResolvedExpected::ErrorAny);
+        }
         return Err(HarnessError::OracleUnavailable(error));
+    }
+
+    if expects_error {
+        return Err(HarnessError::FixtureFormat(format!(
+            "oracle unexpectedly succeeded for expected-error case {}",
+            fixture.case_id
+        )));
     }
 
     match fixture.operation {
@@ -3854,23 +3913,73 @@ fn execute_and_compare_differential(
             let frame = require_frame(fixture)?;
             let labels = require_loc_labels(fixture)?;
             let frame = build_dataframe(frame)?;
-            let actual = frame.loc(labels).map_err(|err| err.to_string())?;
-            let expected = match expected {
-                ResolvedExpected::Frame(frame) => frame,
-                _ => return Err("expected_frame required for dataframe_loc".to_owned()),
-            };
-            Ok(diff_dataframe(&actual, &expected))
+            let actual = frame.loc(labels).map_err(|err| err.to_string());
+            match expected {
+                ResolvedExpected::Frame(frame) => Ok(diff_dataframe(&actual?, &frame)),
+                ResolvedExpected::ErrorContains(substr) => Ok(match actual {
+                    Err(message) if message.contains(&substr) => Vec::new(),
+                    Err(message) => vec![make_drift_record(
+                        ComparisonCategory::Value,
+                        DriftLevel::Critical,
+                        "dataframe_loc.error",
+                        format!(
+                            "expected dataframe_loc error containing '{substr}', got '{message}'"
+                        ),
+                    )],
+                    Ok(_) => vec![make_drift_record(
+                        ComparisonCategory::Value,
+                        DriftLevel::Critical,
+                        "dataframe_loc.error",
+                        "expected dataframe_loc to fail but operation succeeded".to_owned(),
+                    )],
+                }),
+                ResolvedExpected::ErrorAny => Ok(match actual {
+                    Err(_) => Vec::new(),
+                    Ok(_) => vec![make_drift_record(
+                        ComparisonCategory::Value,
+                        DriftLevel::Critical,
+                        "dataframe_loc.error",
+                        "expected dataframe_loc to fail but operation succeeded".to_owned(),
+                    )],
+                }),
+                _ => Err("expected_frame or expected_error required for dataframe_loc".to_owned()),
+            }
         }
         FixtureOperation::DataFrameIloc => {
             let frame = require_frame(fixture)?;
             let positions = require_iloc_positions(fixture)?;
             let frame = build_dataframe(frame)?;
-            let actual = frame.iloc(positions).map_err(|err| err.to_string())?;
-            let expected = match expected {
-                ResolvedExpected::Frame(frame) => frame,
-                _ => return Err("expected_frame required for dataframe_iloc".to_owned()),
-            };
-            Ok(diff_dataframe(&actual, &expected))
+            let actual = frame.iloc(positions).map_err(|err| err.to_string());
+            match expected {
+                ResolvedExpected::Frame(frame) => Ok(diff_dataframe(&actual?, &frame)),
+                ResolvedExpected::ErrorContains(substr) => Ok(match actual {
+                    Err(message) if message.contains(&substr) => Vec::new(),
+                    Err(message) => vec![make_drift_record(
+                        ComparisonCategory::Value,
+                        DriftLevel::Critical,
+                        "dataframe_iloc.error",
+                        format!(
+                            "expected dataframe_iloc error containing '{substr}', got '{message}'"
+                        ),
+                    )],
+                    Ok(_) => vec![make_drift_record(
+                        ComparisonCategory::Value,
+                        DriftLevel::Critical,
+                        "dataframe_iloc.error",
+                        "expected dataframe_iloc to fail but operation succeeded".to_owned(),
+                    )],
+                }),
+                ResolvedExpected::ErrorAny => Ok(match actual {
+                    Err(_) => Vec::new(),
+                    Ok(_) => vec![make_drift_record(
+                        ComparisonCategory::Value,
+                        DriftLevel::Critical,
+                        "dataframe_iloc.error",
+                        "expected dataframe_iloc to fail but operation succeeded".to_owned(),
+                    )],
+                }),
+                _ => Err("expected_frame or expected_error required for dataframe_iloc".to_owned()),
+            }
         }
         FixtureOperation::GroupByMean => {
             let keys = require_left_series(fixture)?;
