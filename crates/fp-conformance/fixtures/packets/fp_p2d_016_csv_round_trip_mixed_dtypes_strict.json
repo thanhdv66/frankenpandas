@@ -1,0 +1,8 @@
+{
+  "packet_id": "FP-P2D-016",
+  "case_id": "csv_round_trip_mixed_dtypes_strict",
+  "mode": "strict",
+  "operation": "csv_round_trip",
+  "csv_input": "id,score,active,tag\n1,95.5,true,gold\n2,87.0,false,silver\n3,100,true,platinum\n",
+  "expected_bool": true
+}

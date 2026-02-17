@@ -1,0 +1,18 @@
+{
+  "packet_id": "FP-P2D-015",
+  "case_id": "nan_min_all_missing_hardened",
+  "mode": "hardened",
+  "operation": "nan_min",
+  "left": {
+    "name": "values",
+    "index": [
+      { "kind": "int64", "value": 0 },
+      { "kind": "int64", "value": 1 }
+    ],
+    "values": [
+      { "kind": "null", "value": "null" },
+      { "kind": "null", "value": "na_n" }
+    ]
+  },
+  "expected_scalar": { "kind": "null", "value": "na_n" }
+}

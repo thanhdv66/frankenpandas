@@ -1,0 +1,83 @@
+{
+  "packet_id": "FP-P2D-014",
+  "case_id": "dataframe_merge_index_inner_duplicates_strict",
+  "mode": "strict",
+  "operation": "dataframe_merge_index",
+  "join_type": "inner",
+  "merge_on": "ix_key",
+  "frame": {
+    "index": [
+      { "kind": "utf8", "value": "k" },
+      { "kind": "utf8", "value": "k" },
+      { "kind": "utf8", "value": "x" }
+    ],
+    "columns": {
+      "left_v": [
+        { "kind": "int64", "value": 1 },
+        { "kind": "int64", "value": 2 },
+        { "kind": "int64", "value": 3 }
+      ],
+      "shared": [
+        { "kind": "int64", "value": 10 },
+        { "kind": "int64", "value": 20 },
+        { "kind": "int64", "value": 30 }
+      ]
+    }
+  },
+  "frame_right": {
+    "index": [
+      { "kind": "utf8", "value": "k" },
+      { "kind": "utf8", "value": "k" }
+    ],
+    "columns": {
+      "right_v": [
+        { "kind": "int64", "value": 100 },
+        { "kind": "int64", "value": 200 }
+      ],
+      "shared": [
+        { "kind": "int64", "value": 7 },
+        { "kind": "int64", "value": 8 }
+      ]
+    }
+  },
+  "expected_frame": {
+    "index": [
+      { "kind": "int64", "value": 0 },
+      { "kind": "int64", "value": 1 },
+      { "kind": "int64", "value": 2 },
+      { "kind": "int64", "value": 3 }
+    ],
+    "columns": {
+      "ix_key": [
+        { "kind": "utf8", "value": "k" },
+        { "kind": "utf8", "value": "k" },
+        { "kind": "utf8", "value": "k" },
+        { "kind": "utf8", "value": "k" }
+      ],
+      "left_v": [
+        { "kind": "int64", "value": 1 },
+        { "kind": "int64", "value": 1 },
+        { "kind": "int64", "value": 2 },
+        { "kind": "int64", "value": 2 }
+      ],
+      "right_v": [
+        { "kind": "int64", "value": 100 },
+        { "kind": "int64", "value": 200 },
+        { "kind": "int64", "value": 100 },
+        { "kind": "int64", "value": 200 }
+      ],
+      "shared_left": [
+        { "kind": "int64", "value": 10 },
+        { "kind": "int64", "value": 10 },
+        { "kind": "int64", "value": 20 },
+        { "kind": "int64", "value": 20 }
+      ],
+      "shared_right": [
+        { "kind": "int64", "value": 7 },
+        { "kind": "int64", "value": 8 },
+        { "kind": "int64", "value": 7 },
+        { "kind": "int64", "value": 8 }
+      ]
+    }
+  }
+}

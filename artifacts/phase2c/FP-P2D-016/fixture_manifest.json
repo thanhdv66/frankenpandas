@@ -1,0 +1,75 @@
+{
+  "packet_id": "FP-P2D-016",
+  "fixtures": [
+    {
+      "id": "csv_round_trip_quoted_commas_strict",
+      "path": "crates/fp-conformance/fixtures/packets/fp_p2d_016_csv_round_trip_quoted_commas_strict.json",
+      "class": "csv_quoted_commas"
+    },
+    {
+      "id": "csv_round_trip_escaped_quotes_strict",
+      "path": "crates/fp-conformance/fixtures/packets/fp_p2d_016_csv_round_trip_escaped_quotes_strict.json",
+      "class": "csv_escaped_quotes"
+    },
+    {
+      "id": "csv_round_trip_embedded_newline_strict",
+      "path": "crates/fp-conformance/fixtures/packets/fp_p2d_016_csv_round_trip_embedded_newline_strict.json",
+      "class": "csv_embedded_newline"
+    },
+    {
+      "id": "csv_round_trip_crlf_hardened",
+      "path": "crates/fp-conformance/fixtures/packets/fp_p2d_016_csv_round_trip_crlf_hardened.json",
+      "class": "csv_crlf"
+    },
+    {
+      "id": "csv_round_trip_unicode_utf8_strict",
+      "path": "crates/fp-conformance/fixtures/packets/fp_p2d_016_csv_round_trip_unicode_utf8_strict.json",
+      "class": "csv_utf8_unicode"
+    },
+    {
+      "id": "csv_round_trip_mixed_dtypes_strict",
+      "path": "crates/fp-conformance/fixtures/packets/fp_p2d_016_csv_round_trip_mixed_dtypes_strict.json",
+      "class": "csv_mixed_dtypes"
+    },
+    {
+      "id": "csv_round_trip_numeric_null_hardened",
+      "path": "crates/fp-conformance/fixtures/packets/fp_p2d_016_csv_round_trip_numeric_null_hardened.json",
+      "class": "csv_numeric_nulls"
+    },
+    {
+      "id": "csv_round_trip_trailing_newline_strict",
+      "path": "crates/fp-conformance/fixtures/packets/fp_p2d_016_csv_round_trip_trailing_newline_strict.json",
+      "class": "csv_trailing_newline"
+    },
+    {
+      "id": "csv_round_trip_no_trailing_newline_hardened",
+      "path": "crates/fp-conformance/fixtures/packets/fp_p2d_016_csv_round_trip_no_trailing_newline_hardened.json",
+      "class": "csv_no_trailing_newline"
+    },
+    {
+      "id": "csv_round_trip_header_only_strict",
+      "path": "crates/fp-conformance/fixtures/packets/fp_p2d_016_csv_round_trip_header_only_strict.json",
+      "class": "csv_header_only"
+    },
+    {
+      "id": "csv_round_trip_quoted_empty_fields_hardened",
+      "path": "crates/fp-conformance/fixtures/packets/fp_p2d_016_csv_round_trip_quoted_empty_fields_hardened.json",
+      "class": "csv_quoted_empty_fields"
+    },
+    {
+      "id": "csv_round_trip_ragged_row_error_strict",
+      "path": "crates/fp-conformance/fixtures/packets/fp_p2d_016_csv_round_trip_ragged_row_error_strict.json",
+      "class": "csv_ragged_row_error"
+    },
+    {
+      "id": "csv_round_trip_extra_field_error_hardened",
+      "path": "crates/fp-conformance/fixtures/packets/fp_p2d_016_csv_round_trip_extra_field_error_hardened.json",
+      "class": "csv_extra_field_error"
+    },
+    {
+      "id": "csv_round_trip_unclosed_quote_error_strict",
+      "path": "crates/fp-conformance/fixtures/packets/fp_p2d_016_csv_round_trip_unclosed_quote_error_strict.json",
+      "class": "csv_unclosed_quote_error"
+    }
+  ]
+}

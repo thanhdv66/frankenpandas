@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import io
 import json
 import math
 import os
@@ -248,8 +249,10 @@ def op_series_join(pd, payload: dict[str, Any]) -> dict[str, Any]:
     join_type = payload.get("join_type")
     if left is None or right is None:
         raise OracleError("series_join requires left and right payloads")
-    if join_type not in {"inner", "left"}:
-        raise OracleError(f"series_join requires join_type=inner|left, got {join_type!r}")
+    if join_type not in {"inner", "left", "right", "outer"}:
+        raise OracleError(
+            f"series_join requires join_type=inner|left|right|outer, got {join_type!r}"
+        )
 
     left_index = [label_from_json(item) for item in left["index"]]
     right_index = [label_from_json(item) for item in right["index"]]
@@ -393,6 +396,98 @@ def op_groupby_var(pd, payload: dict[str, Any]) -> dict[str, Any]:
 
 def op_groupby_median(pd, payload: dict[str, Any]) -> dict[str, Any]:
     return op_groupby_agg(pd, payload, "median", "groupby_median")
+
+
+def op_nan_agg(pd, payload: dict[str, Any], agg: str, op_name: str) -> dict[str, Any]:
+    left = payload.get("left")
+    if left is None:
+        raise OracleError(f"{op_name} requires left(values) payload")
+
+    values = [scalar_from_json(item) for item in left["values"]]
+    series = pd.Series(values, dtype="float64")
+
+    if agg == "sum":
+        out = series.sum(skipna=True)
+    elif agg == "mean":
+        out = series.mean(skipna=True)
+    elif agg == "min":
+        out = series.min(skipna=True)
+    elif agg == "max":
+        out = series.max(skipna=True)
+    elif agg == "std":
+        out = series.std(skipna=True, ddof=1)
+    elif agg == "var":
+        out = series.var(skipna=True, ddof=1)
+    elif agg == "count":
+        out = int(series.count())
+    else:
+        raise OracleError(f"unsupported nan aggregation: {agg!r}")
+
+    return {"expected_scalar": scalar_to_json(out)}
+
+
+def op_nan_sum(pd, payload: dict[str, Any]) -> dict[str, Any]:
+    return op_nan_agg(pd, payload, "sum", "nan_sum")
+
+
+def op_nan_mean(pd, payload: dict[str, Any]) -> dict[str, Any]:
+    return op_nan_agg(pd, payload, "mean", "nan_mean")
+
+
+def op_nan_min(pd, payload: dict[str, Any]) -> dict[str, Any]:
+    return op_nan_agg(pd, payload, "min", "nan_min")
+
+
+def op_nan_max(pd, payload: dict[str, Any]) -> dict[str, Any]:
+    return op_nan_agg(pd, payload, "max", "nan_max")
+
+
+def op_nan_std(pd, payload: dict[str, Any]) -> dict[str, Any]:
+    return op_nan_agg(pd, payload, "std", "nan_std")
+
+
+def op_nan_var(pd, payload: dict[str, Any]) -> dict[str, Any]:
+    return op_nan_agg(pd, payload, "var", "nan_var")
+
+
+def op_nan_count(pd, payload: dict[str, Any]) -> dict[str, Any]:
+    return op_nan_agg(pd, payload, "count", "nan_count")
+
+
+def csv_dataframes_semantically_equal(left, right) -> bool:
+    if left.columns.tolist() != right.columns.tolist():
+        return False
+    if len(left.index) != len(right.index):
+        return False
+
+    for name in left.columns.tolist():
+        left_values = left[name].tolist()
+        right_values = right[name].tolist()
+        if len(left_values) != len(right_values):
+            return False
+        for left_value, right_value in zip(left_values, right_values):
+            if scalar_is_missing(left_value) and scalar_is_missing(right_value):
+                continue
+            if left_value != right_value:
+                return False
+    return True
+
+
+def op_csv_round_trip(pd, payload: dict[str, Any]) -> dict[str, Any]:
+    csv_input = payload.get("csv_input")
+    if not isinstance(csv_input, str):
+        raise OracleError("csv_round_trip requires csv_input payload")
+
+    try:
+        frame = pd.read_csv(io.StringIO(csv_input))
+        output = frame.to_csv(index=False, lineterminator="\n")
+        reparsed = pd.read_csv(io.StringIO(output))
+    except Exception as exc:
+        raise OracleError(f"csv_round_trip failed: {exc}") from exc
+
+    return {
+        "expected_bool": bool(csv_dataframes_semantically_equal(frame, reparsed)),
+    }
 
 
 def op_index_align_union(pd, payload: dict[str, Any]) -> dict[str, Any]:
@@ -634,6 +729,84 @@ def op_dataframe_iloc(pd, payload: dict[str, Any]) -> dict[str, Any]:
     return {"expected_frame": dataframe_to_json(out)}
 
 
+def require_join_type(payload: dict[str, Any], op_name: str) -> str:
+    join_type = payload.get("join_type")
+    if join_type not in {"inner", "left", "right", "outer"}:
+        raise OracleError(
+            f"{op_name} requires join_type=inner|left|right|outer, got {join_type!r}"
+        )
+    return str(join_type)
+
+
+def dataframe_with_index_key(frame, key_name: str):
+    out = frame.copy()
+    out[key_name] = frame.index.tolist()
+    return out
+
+
+def op_dataframe_merge(
+    pd, payload: dict[str, Any], *, use_index_keys: bool = False
+) -> dict[str, Any]:
+    frame_payload = payload.get("frame")
+    frame_right_payload = payload.get("frame_right")
+    if frame_payload is None or frame_right_payload is None:
+        raise OracleError("dataframe_merge requires frame and frame_right payloads")
+
+    how = require_join_type(
+        payload, "dataframe_merge_index" if use_index_keys else "dataframe_merge"
+    )
+
+    left = dataframe_from_json(pd, frame_payload)
+    right = dataframe_from_json(pd, frame_right_payload)
+
+    if use_index_keys:
+        merge_on_raw = payload.get("merge_on")
+        merge_on = (
+            str(merge_on_raw)
+            if isinstance(merge_on_raw, str) and merge_on_raw
+            else "__index_key"
+        )
+        left = dataframe_with_index_key(left, merge_on)
+        right = dataframe_with_index_key(right, merge_on)
+    else:
+        merge_on_raw = payload.get("merge_on")
+        if not isinstance(merge_on_raw, str) or not merge_on_raw:
+            raise OracleError("dataframe_merge requires merge_on string payload")
+        merge_on = merge_on_raw
+
+    out = left.merge(
+        right,
+        on=merge_on,
+        how=how,
+        sort=False,
+        copy=False,
+        suffixes=("_left", "_right"),
+    )
+    return {"expected_frame": dataframe_to_json(out)}
+
+
+def op_dataframe_merge_index(pd, payload: dict[str, Any]) -> dict[str, Any]:
+    return op_dataframe_merge(pd, payload, use_index_keys=True)
+
+
+def op_dataframe_concat(pd, payload: dict[str, Any]) -> dict[str, Any]:
+    frame_payload = payload.get("frame")
+    frame_right_payload = payload.get("frame_right")
+    if frame_payload is None or frame_right_payload is None:
+        raise OracleError("dataframe_concat requires frame and frame_right payloads")
+
+    left = dataframe_from_json(pd, frame_payload)
+    right = dataframe_from_json(pd, frame_right_payload)
+
+    if sorted(left.columns.tolist()) != sorted(right.columns.tolist()):
+        raise OracleError(
+            "dataframe_concat column mismatch: right frame columns do not match left frame"
+        )
+
+    out = pd.concat([left, right], axis=0, sort=False)
+    return {"expected_frame": dataframe_to_json(out)}
+
+
 def dispatch(pd, payload: dict[str, Any]) -> dict[str, Any]:
     op = payload.get("operation")
     if op == "series_add":
@@ -660,6 +833,22 @@ def dispatch(pd, payload: dict[str, Any]) -> dict[str, Any]:
         return op_groupby_var(pd, payload)
     if op in {"groupby_median", "group_by_median"}:
         return op_groupby_median(pd, payload)
+    if op in {"nan_sum", "nansum"}:
+        return op_nan_sum(pd, payload)
+    if op in {"nan_mean", "nanmean"}:
+        return op_nan_mean(pd, payload)
+    if op in {"nan_min", "nanmin"}:
+        return op_nan_min(pd, payload)
+    if op in {"nan_max", "nanmax"}:
+        return op_nan_max(pd, payload)
+    if op in {"nan_std", "nanstd"}:
+        return op_nan_std(pd, payload)
+    if op in {"nan_var", "nanvar"}:
+        return op_nan_var(pd, payload)
+    if op in {"nan_count", "nancount"}:
+        return op_nan_count(pd, payload)
+    if op == "csv_round_trip":
+        return op_csv_round_trip(pd, payload)
     if op == "index_align_union":
         return op_index_align_union(pd, payload)
     if op == "index_has_duplicates":
@@ -678,6 +867,12 @@ def dispatch(pd, payload: dict[str, Any]) -> dict[str, Any]:
         return op_dataframe_loc(pd, payload)
     if op == "dataframe_iloc":
         return op_dataframe_iloc(pd, payload)
+    if op in {"dataframe_merge", "data_frame_merge"}:
+        return op_dataframe_merge(pd, payload)
+    if op in {"dataframe_merge_index", "data_frame_merge_index"}:
+        return op_dataframe_merge_index(pd, payload)
+    if op in {"dataframe_concat", "data_frame_concat"}:
+        return op_dataframe_concat(pd, payload)
     raise OracleError(f"unsupported operation: {op!r}")
 
 
@@ -693,6 +888,8 @@ def main() -> int:
         response.setdefault("expected_alignment", None)
         response.setdefault("expected_bool", None)
         response.setdefault("expected_positions", None)
+        response.setdefault("expected_scalar", None)
+        response.setdefault("expected_dtype", None)
         response["error"] = None
         json.dump(response, sys.stdout)
         return 0
@@ -705,6 +902,8 @@ def main() -> int:
                 "expected_alignment": None,
                 "expected_bool": None,
                 "expected_positions": None,
+                "expected_scalar": None,
+                "expected_dtype": None,
                 "error": str(exc),
             },
             sys.stdout,
@@ -719,6 +918,8 @@ def main() -> int:
                 "expected_alignment": None,
                 "expected_bool": None,
                 "expected_positions": None,
+                "expected_scalar": None,
+                "expected_dtype": None,
                 "error": f"unexpected oracle failure: {exc}",
             },
             sys.stdout,

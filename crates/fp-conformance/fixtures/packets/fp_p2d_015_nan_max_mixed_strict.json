@@ -1,0 +1,22 @@
+{
+  "packet_id": "FP-P2D-015",
+  "case_id": "nan_max_mixed_strict",
+  "mode": "strict",
+  "operation": "nan_max",
+  "left": {
+    "name": "values",
+    "index": [
+      { "kind": "int64", "value": 0 },
+      { "kind": "int64", "value": 1 },
+      { "kind": "int64", "value": 2 },
+      { "kind": "int64", "value": 3 }
+    ],
+    "values": [
+      { "kind": "int64", "value": 5 },
+      { "kind": "null", "value": "null" },
+      { "kind": "float64", "value": 8.5 },
+      { "kind": "bool", "value": false }
+    ]
+  },
+  "expected_scalar": { "kind": "float64", "value": 8.5 }
+}

@@ -1,0 +1,8 @@
+{
+  "packet_id": "FP-P2D-016",
+  "case_id": "csv_round_trip_quoted_commas_strict",
+  "mode": "strict",
+  "operation": "csv_round_trip",
+  "csv_input": "name,address\n\"Smith, John\",\"123 Main St, Apt 4\"\n\"Lee, Ada\",\"5 Park Ave\"\n",
+  "expected_bool": true
+}

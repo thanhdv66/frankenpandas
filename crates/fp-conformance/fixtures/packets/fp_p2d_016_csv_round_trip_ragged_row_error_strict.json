@@ -1,0 +1,8 @@
+{
+  "packet_id": "FP-P2D-016",
+  "case_id": "csv_round_trip_ragged_row_error_strict",
+  "mode": "strict",
+  "operation": "csv_round_trip",
+  "csv_input": "a,b\n1,2\n3\n",
+  "expected_error_contains": "CSV error"
+}

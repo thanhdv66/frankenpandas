@@ -1,0 +1,8 @@
+{
+  "packet_id": "FP-P2D-016",
+  "case_id": "csv_round_trip_numeric_null_hardened",
+  "mode": "hardened",
+  "operation": "csv_round_trip",
+  "csv_input": "id,value,flag\n1,10,true\n2,,false\n3,3.5,true\n",
+  "expected_bool": true
+}

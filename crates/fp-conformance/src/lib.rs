@@ -7,14 +7,15 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
-use fp_frame::{DataFrame, FrameError, Series, concat_series};
+use fp_columnar::Column;
+use fp_frame::{DataFrame, FrameError, Series, concat_dataframes, concat_series};
 use fp_groupby::{
     GroupByOptions, groupby_count, groupby_first, groupby_last, groupby_max, groupby_mean,
     groupby_median, groupby_min, groupby_std, groupby_sum, groupby_var,
 };
 use fp_index::{AlignmentPlan, Index, IndexLabel, align_union, validate_alignment_plan};
 use fp_io::{read_csv_str, write_csv_string};
-use fp_join::{JoinType, join_series};
+use fp_join::{JoinType, join_series, merge_dataframes};
 #[cfg(feature = "asupersync")]
 use fp_runtime::asupersync::{
     ArtifactCodec, ArtifactPayload, Fnv1aVerifier, IntegrityVerifier, PassthroughCodec,
@@ -24,7 +25,9 @@ use fp_runtime::{
     DecisionAction, DecodeProof, EvidenceLedger, MAX_DECODE_PROOFS, RaptorQEnvelope,
     RaptorQMetadata, RuntimeMode, RuntimePolicy, ScrubStatus,
 };
-use fp_types::{NullKind, Scalar, dropna, fill_na, nansum};
+use fp_types::{
+    NullKind, Scalar, dropna, fill_na, nancount, nanmax, nanmean, nanmin, nanstd, nansum, nanvar,
+};
 use raptorq::{Decoder, Encoder, EncodingPacket, ObjectTransmissionInformation};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -142,6 +145,12 @@ pub enum FixtureOperation {
     SeriesConcat,
     // FP-P2C-007: Missingness + nanops
     NanSum,
+    NanMean,
+    NanMin,
+    NanMax,
+    NanStd,
+    NanVar,
+    NanCount,
     FillNa,
     DropNa,
     // FP-P2C-008: IO round-trip
@@ -157,6 +166,13 @@ pub enum FixtureOperation {
     DataFrameLoc,
     #[serde(rename = "dataframe_iloc", alias = "data_frame_iloc")]
     DataFrameIloc,
+    // FP-P2D-014: DataFrame merge/join/concat parity matrix
+    #[serde(rename = "dataframe_merge", alias = "data_frame_merge")]
+    DataFrameMerge,
+    #[serde(rename = "dataframe_merge_index", alias = "data_frame_merge_index")]
+    DataFrameMergeIndex,
+    #[serde(rename = "dataframe_concat", alias = "data_frame_concat")]
+    DataFrameConcat,
     // FP-P2C-011: Full GroupBy aggregate matrix
     #[serde(rename = "groupby_mean", alias = "group_by_mean")]
     GroupByMean,
@@ -178,11 +194,57 @@ pub enum FixtureOperation {
     GroupByMedian,
 }
 
+impl FixtureOperation {
+    #[must_use]
+    pub fn operation_name(self) -> &'static str {
+        match self {
+            Self::SeriesAdd => "series_add",
+            Self::SeriesJoin => "series_join",
+            Self::GroupBySum => "groupby_sum",
+            Self::IndexAlignUnion => "index_align_union",
+            Self::IndexHasDuplicates => "index_has_duplicates",
+            Self::IndexFirstPositions => "index_first_positions",
+            Self::SeriesConcat => "series_concat",
+            Self::NanSum => "nan_sum",
+            Self::NanMean => "nan_mean",
+            Self::NanMin => "nan_min",
+            Self::NanMax => "nan_max",
+            Self::NanStd => "nan_std",
+            Self::NanVar => "nan_var",
+            Self::NanCount => "nan_count",
+            Self::FillNa => "fill_na",
+            Self::DropNa => "drop_na",
+            Self::CsvRoundTrip => "csv_round_trip",
+            Self::ColumnDtypeCheck => "column_dtype_check",
+            Self::SeriesFilter => "series_filter",
+            Self::SeriesHead => "series_head",
+            Self::SeriesLoc => "series_loc",
+            Self::SeriesIloc => "series_iloc",
+            Self::DataFrameLoc => "dataframe_loc",
+            Self::DataFrameIloc => "dataframe_iloc",
+            Self::DataFrameMerge => "dataframe_merge",
+            Self::DataFrameMergeIndex => "dataframe_merge_index",
+            Self::DataFrameConcat => "dataframe_concat",
+            Self::GroupByMean => "groupby_mean",
+            Self::GroupByCount => "groupby_count",
+            Self::GroupByMin => "groupby_min",
+            Self::GroupByMax => "groupby_max",
+            Self::GroupByFirst => "groupby_first",
+            Self::GroupByLast => "groupby_last",
+            Self::GroupByStd => "groupby_std",
+            Self::GroupByVar => "groupby_var",
+            Self::GroupByMedian => "groupby_median",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FixtureJoinType {
     Inner,
     Left,
+    Right,
+    Outer,
 }
 
 impl FixtureJoinType {
@@ -191,6 +253,8 @@ impl FixtureJoinType {
         match self {
             Self::Inner => JoinType::Inner,
             Self::Left => JoinType::Left,
+            Self::Right => JoinType::Right,
+            Self::Outer => JoinType::Outer,
         }
     }
 }
@@ -258,9 +322,13 @@ pub struct PacketFixture {
     #[serde(default)]
     pub frame: Option<FixtureDataFrame>,
     #[serde(default)]
+    pub frame_right: Option<FixtureDataFrame>,
+    #[serde(default)]
     pub index: Option<Vec<IndexLabel>>,
     #[serde(default)]
     pub join_type: Option<FixtureJoinType>,
+    #[serde(default)]
+    pub merge_on: Option<String>,
     #[serde(default)]
     pub expected_series: Option<FixtureExpectedSeries>,
     #[serde(default)]
@@ -469,7 +537,11 @@ const COMPAT_CLOSURE_REQUIRED_ROWS: [&str; 9] = [
 fn compat_contract_rows_for_operation(operation: FixtureOperation) -> &'static [&'static str] {
     match operation {
         FixtureOperation::SeriesAdd => &["CC-004", "CC-005"],
-        FixtureOperation::SeriesJoin | FixtureOperation::SeriesConcat => &["CC-006"],
+        FixtureOperation::SeriesJoin
+        | FixtureOperation::SeriesConcat
+        | FixtureOperation::DataFrameMerge
+        | FixtureOperation::DataFrameMergeIndex
+        | FixtureOperation::DataFrameConcat => &["CC-006"],
         FixtureOperation::GroupBySum
         | FixtureOperation::GroupByMean
         | FixtureOperation::GroupByCount
@@ -483,7 +555,13 @@ fn compat_contract_rows_for_operation(operation: FixtureOperation) -> &'static [
         FixtureOperation::IndexAlignUnion
         | FixtureOperation::IndexHasDuplicates
         | FixtureOperation::IndexFirstPositions => &["CC-003"],
-        FixtureOperation::NanSum => &["CC-005"],
+        FixtureOperation::NanSum
+        | FixtureOperation::NanMean
+        | FixtureOperation::NanMin
+        | FixtureOperation::NanMax
+        | FixtureOperation::NanStd
+        | FixtureOperation::NanVar
+        | FixtureOperation::NanCount => &["CC-005"],
         FixtureOperation::FillNa | FixtureOperation::DropNa => &["CC-002", "CC-005"],
         FixtureOperation::CsvRoundTrip => &["CC-006"],
         FixtureOperation::ColumnDtypeCheck => &["CC-001"],
@@ -947,8 +1025,10 @@ struct OracleRequest {
     #[serde(default)]
     groupby_keys: Option<Vec<FixtureSeries>>,
     frame: Option<FixtureDataFrame>,
+    frame_right: Option<FixtureDataFrame>,
     index: Option<Vec<IndexLabel>>,
     join_type: Option<FixtureJoinType>,
+    merge_on: Option<String>,
     #[serde(default)]
     fill_value: Option<Scalar>,
     #[serde(default)]
@@ -2184,7 +2264,7 @@ pub fn verify_all_sidecars_ci(
             e.file_type().map(|t| t.is_dir()).unwrap_or(false)
                 && e.file_name()
                     .to_str()
-                    .map(|n| n.starts_with("FP-P2C-"))
+                    .map(|n| n.starts_with("FP-P2"))
                     .unwrap_or(false)
         })
         .collect();
@@ -2906,14 +2986,24 @@ fn run_fixture_operation(
             };
             compare_series_expected(&actual, &expected)
         }
-        FixtureOperation::NanSum => {
-            let left = require_left_series(fixture)?;
-            let actual = nansum(&left.values);
+        FixtureOperation::NanSum
+        | FixtureOperation::NanMean
+        | FixtureOperation::NanMin
+        | FixtureOperation::NanMax
+        | FixtureOperation::NanStd
+        | FixtureOperation::NanVar
+        | FixtureOperation::NanCount => {
+            let actual = execute_nanop_fixture_operation(fixture, fixture.operation)?;
             let expected = match expected {
                 ResolvedExpected::Scalar(scalar) => scalar,
-                _ => return Err("expected_scalar is required for nan_sum".to_owned()),
+                _ => {
+                    return Err(format!(
+                        "expected_scalar is required for {}",
+                        fixture.operation.operation_name()
+                    ));
+                }
             };
-            compare_scalar(&actual, &expected, "nan_sum")
+            compare_scalar(&actual, &expected, fixture.operation.operation_name())
         }
         FixtureOperation::FillNa => {
             let left = require_left_series(fixture)?;
@@ -2950,35 +3040,32 @@ fn run_fixture_operation(
             Ok(())
         }
         FixtureOperation::CsvRoundTrip => {
-            let csv_input = fixture
-                .csv_input
-                .as_ref()
-                .ok_or_else(|| "csv_input is required for csv_round_trip".to_owned())?;
-            let df = read_csv_str(csv_input).map_err(|err| err.to_string())?;
-            let output = write_csv_string(&df).map_err(|err| err.to_string())?;
-            let df2 = read_csv_str(&output).map_err(|err| err.to_string())?;
-            if df.column_names() != df2.column_names() {
-                return Err(format!(
-                    "csv round-trip column mismatch: {:?} vs {:?}",
-                    df.column_names(),
-                    df2.column_names()
-                ));
+            let actual = execute_csv_round_trip_fixture_operation(fixture);
+            match expected {
+                ResolvedExpected::Bool(value) => {
+                    let round_trip_ok = actual?;
+                    if round_trip_ok != value {
+                        return Err(format!(
+                            "csv_round_trip mismatch: actual={round_trip_ok}, expected={value}"
+                        ));
+                    }
+                    Ok(())
+                }
+                ResolvedExpected::ErrorContains(substr) => match actual {
+                    Err(message) if message.contains(&substr) => Ok(()),
+                    Err(message) => Err(format!(
+                        "expected csv_round_trip error containing '{substr}', got '{message}'"
+                    )),
+                    Ok(_) => Err(format!(
+                        "expected csv_round_trip to fail with error containing '{substr}'"
+                    )),
+                },
+                ResolvedExpected::ErrorAny => match actual {
+                    Err(_) => Ok(()),
+                    Ok(_) => Err("expected csv_round_trip to fail".to_owned()),
+                },
+                _ => Err("expected_bool or expected_error is required for csv_round_trip".to_owned()),
             }
-            if df.len() != df2.len() {
-                return Err(format!(
-                    "csv round-trip row count mismatch: {} vs {}",
-                    df.len(),
-                    df2.len()
-                ));
-            }
-            let expected = match expected {
-                ResolvedExpected::Bool(value) => value,
-                _ => return Err("expected_bool is required for csv_round_trip".to_owned()),
-            };
-            if !expected {
-                return Err("csv round-trip expected to fail".to_owned());
-            }
-            Ok(())
         }
         FixtureOperation::ColumnDtypeCheck => {
             let left = require_left_series(fixture)?;
@@ -3151,6 +3238,39 @@ fn run_fixture_operation(
                 ),
             }
         }
+        FixtureOperation::DataFrameMerge
+        | FixtureOperation::DataFrameMergeIndex
+        | FixtureOperation::DataFrameConcat => {
+            let actual = execute_dataframe_fixture_operation(fixture);
+            match expected {
+                ResolvedExpected::Frame(frame) => compare_dataframe_expected(&actual?, &frame),
+                ResolvedExpected::ErrorContains(substr) => match actual {
+                    Err(message) if message.contains(&substr) => Ok(()),
+                    Err(message) => Err(format!(
+                        "expected {:?} error containing '{substr}', got '{message}'",
+                        fixture.operation
+                    )),
+                    Ok(_) => Err(format!(
+                        "expected {:?} to fail with error containing '{substr}'",
+                        fixture.operation
+                    )),
+                },
+                ResolvedExpected::ErrorAny => {
+                    if actual.is_err() {
+                        Ok(())
+                    } else {
+                        Err(format!(
+                            "expected {:?} to fail but operation succeeded",
+                            fixture.operation
+                        ))
+                    }
+                }
+                _ => Err(format!(
+                    "expected_frame or expected_error is required for {:?}",
+                    fixture.operation
+                )),
+            }
+        }
         FixtureOperation::GroupByMean
         | FixtureOperation::GroupByCount
         | FixtureOperation::GroupByMin
@@ -3289,7 +3409,11 @@ fn fixture_expected(fixture: &PacketFixture) -> Result<ResolvedExpected, Harness
                     fixture.case_id
                 ))
             }),
-        FixtureOperation::DataFrameLoc | FixtureOperation::DataFrameIloc => fixture
+        FixtureOperation::DataFrameLoc
+        | FixtureOperation::DataFrameIloc
+        | FixtureOperation::DataFrameMerge
+        | FixtureOperation::DataFrameMergeIndex
+        | FixtureOperation::DataFrameConcat => fixture
             .expected_frame
             .clone()
             .map(ResolvedExpected::Frame)
@@ -3299,7 +3423,13 @@ fn fixture_expected(fixture: &PacketFixture) -> Result<ResolvedExpected, Harness
                     fixture.case_id
                 ))
             }),
-        FixtureOperation::NanSum => fixture
+        FixtureOperation::NanSum
+        | FixtureOperation::NanMean
+        | FixtureOperation::NanMin
+        | FixtureOperation::NanMax
+        | FixtureOperation::NanStd
+        | FixtureOperation::NanVar
+        | FixtureOperation::NanCount => fixture
             .expected_scalar
             .clone()
             .map(ResolvedExpected::Scalar)
@@ -3357,8 +3487,10 @@ fn capture_live_oracle_expected(
         right: fixture.right.clone(),
         groupby_keys: fixture.groupby_keys.clone(),
         frame: fixture.frame.clone(),
+        frame_right: fixture.frame_right.clone(),
         index: fixture.index.clone(),
         join_type: fixture.join_type,
+        merge_on: fixture.merge_on.clone(),
         fill_value: fixture.fill_value.clone(),
         head_n: fixture.head_n,
         csv_input: fixture.csv_input.clone(),
@@ -3478,11 +3610,21 @@ fn capture_live_oracle_expected(
             .ok_or_else(|| {
                 HarnessError::FixtureFormat("oracle omitted expected_series".to_owned())
             }),
-        FixtureOperation::DataFrameLoc | FixtureOperation::DataFrameIloc => response
+        FixtureOperation::DataFrameLoc
+        | FixtureOperation::DataFrameIloc
+        | FixtureOperation::DataFrameMerge
+        | FixtureOperation::DataFrameMergeIndex
+        | FixtureOperation::DataFrameConcat => response
             .expected_frame
             .map(ResolvedExpected::Frame)
             .ok_or_else(|| HarnessError::FixtureFormat("oracle omitted expected_frame".to_owned())),
-        FixtureOperation::NanSum => response
+        FixtureOperation::NanSum
+        | FixtureOperation::NanMean
+        | FixtureOperation::NanMin
+        | FixtureOperation::NanMax
+        | FixtureOperation::NanStd
+        | FixtureOperation::NanVar
+        | FixtureOperation::NanCount => response
             .expected_scalar
             .map(ResolvedExpected::Scalar)
             .ok_or_else(|| {
@@ -3520,6 +3662,13 @@ fn require_frame(fixture: &PacketFixture) -> Result<&FixtureDataFrame, String> {
         .ok_or_else(|| "missing frame fixture payload".to_owned())
 }
 
+fn require_frame_right(fixture: &PacketFixture) -> Result<&FixtureDataFrame, String> {
+    fixture
+        .frame_right
+        .as_ref()
+        .ok_or_else(|| "missing frame_right fixture payload".to_owned())
+}
+
 fn require_index(fixture: &PacketFixture) -> Result<&Vec<IndexLabel>, String> {
     fixture
         .index
@@ -3531,6 +3680,13 @@ fn require_join_type(fixture: &PacketFixture) -> Result<FixtureJoinType, String>
     fixture
         .join_type
         .ok_or_else(|| "missing join_type for join fixture".to_owned())
+}
+
+fn require_merge_on(fixture: &PacketFixture) -> Result<&str, String> {
+    fixture
+        .merge_on
+        .as_deref()
+        .ok_or_else(|| "missing merge_on for dataframe_merge fixture".to_owned())
 }
 
 fn require_loc_labels(fixture: &PacketFixture) -> Result<&Vec<IndexLabel>, String> {
@@ -3545,6 +3701,129 @@ fn require_iloc_positions(fixture: &PacketFixture) -> Result<&Vec<i64>, String> 
         .iloc_positions
         .as_ref()
         .ok_or_else(|| "iloc_positions is required for iloc operations".to_owned())
+}
+
+fn execute_nanop_fixture_operation(
+    fixture: &PacketFixture,
+    operation: FixtureOperation,
+) -> Result<Scalar, String> {
+    let left = require_left_series(fixture)?;
+    Ok(match operation {
+        FixtureOperation::NanSum => nansum(&left.values),
+        FixtureOperation::NanMean => nanmean(&left.values),
+        FixtureOperation::NanMin => nanmin(&left.values),
+        FixtureOperation::NanMax => nanmax(&left.values),
+        FixtureOperation::NanStd => nanstd(&left.values, 1),
+        FixtureOperation::NanVar => nanvar(&left.values, 1),
+        FixtureOperation::NanCount => nancount(&left.values),
+        _ => {
+            return Err(format!(
+                "unsupported nanops operation for fixture execution: {operation:?}"
+            ));
+        }
+    })
+}
+
+fn execute_csv_round_trip_fixture_operation(fixture: &PacketFixture) -> Result<bool, String> {
+    let csv_input = fixture
+        .csv_input
+        .as_ref()
+        .ok_or_else(|| "csv_input is required for csv_round_trip".to_owned())?;
+    let df = read_csv_str(csv_input).map_err(|err| format!("csv parse failed: {err}"))?;
+    let output = write_csv_string(&df).map_err(|err| format!("csv write failed: {err}"))?;
+    let reparsed = read_csv_str(&output).map_err(|err| format!("csv reparse failed: {err}"))?;
+    Ok(dataframes_semantically_equal(&df, &reparsed))
+}
+
+fn dataframes_semantically_equal(left: &DataFrame, right: &DataFrame) -> bool {
+    if left.column_names() != right.column_names() || left.len() != right.len() {
+        return false;
+    }
+    for name in left.columns().keys() {
+        let Some(left_col) = left.column(name) else {
+            return false;
+        };
+        let Some(right_col) = right.column(name) else {
+            return false;
+        };
+        if !left_col.semantic_eq(right_col) {
+            return false;
+        }
+    }
+    true
+}
+
+const INDEX_MERGE_KEY_COLUMN: &str = "__index_key";
+
+fn execute_dataframe_fixture_operation(fixture: &PacketFixture) -> Result<DataFrame, String> {
+    match fixture.operation {
+        FixtureOperation::DataFrameMerge => {
+            execute_dataframe_merge_fixture_operation(fixture, false)
+        }
+        FixtureOperation::DataFrameMergeIndex => {
+            execute_dataframe_merge_fixture_operation(fixture, true)
+        }
+        FixtureOperation::DataFrameConcat => {
+            let left = build_dataframe(require_frame(fixture)?)
+                .map_err(|err| format!("left frame build failed: {err}"))?;
+            let right = build_dataframe(require_frame_right(fixture)?)
+                .map_err(|err| format!("right frame build failed: {err}"))?;
+            concat_dataframes(&[&left, &right]).map_err(|err| err.to_string())
+        }
+        _ => Err(format!(
+            "unsupported dataframe operation for fixture execution: {:?}",
+            fixture.operation
+        )),
+    }
+}
+
+fn execute_dataframe_merge_fixture_operation(
+    fixture: &PacketFixture,
+    merge_on_index: bool,
+) -> Result<DataFrame, String> {
+    let left = build_dataframe(require_frame(fixture)?)
+        .map_err(|err| format!("left frame build failed: {err}"))?;
+    let right = build_dataframe(require_frame_right(fixture)?)
+        .map_err(|err| format!("right frame build failed: {err}"))?;
+    let join_type = require_join_type(fixture)?.into_join_type();
+
+    let (left_input, right_input, merge_on) = if merge_on_index {
+        let key_name = fixture
+            .merge_on
+            .clone()
+            .unwrap_or_else(|| INDEX_MERGE_KEY_COLUMN.to_owned());
+        (
+            dataframe_with_index_as_column(&left, &key_name)?,
+            dataframe_with_index_as_column(&right, &key_name)?,
+            key_name,
+        )
+    } else {
+        (left, right, require_merge_on(fixture)?.to_owned())
+    };
+
+    let merged = merge_dataframes(&left_input, &right_input, &merge_on, join_type)
+        .map_err(|err| err.to_string())?;
+    DataFrame::new(merged.index, merged.columns).map_err(|err| err.to_string())
+}
+
+fn dataframe_with_index_as_column(frame: &DataFrame, key_name: &str) -> Result<DataFrame, String> {
+    let index_values = frame
+        .index()
+        .labels()
+        .iter()
+        .map(index_label_to_scalar)
+        .collect::<Vec<_>>();
+    let key_column = Column::from_values(index_values).map_err(|err| err.to_string())?;
+    frame
+        .with_column(key_name, key_column)
+        .map_err(|err| err.to_string())
+}
+
+fn index_label_to_scalar(label: &IndexLabel) -> Scalar {
+    match label {
+        IndexLabel::Int64(value) => Scalar::Int64(*value),
+        IndexLabel::Utf8(value) => Scalar::Utf8(value.clone()),
+    }
 }
 
 fn execute_groupby_fixture_operation(
@@ -4069,14 +4348,28 @@ fn execute_and_compare_differential(
             };
             Ok(diff_series(&actual, &expected))
         }
-        FixtureOperation::NanSum => {
-            let left = require_left_series(fixture)?;
-            let actual = nansum(&left.values);
+        FixtureOperation::NanSum
+        | FixtureOperation::NanMean
+        | FixtureOperation::NanMin
+        | FixtureOperation::NanMax
+        | FixtureOperation::NanStd
+        | FixtureOperation::NanVar
+        | FixtureOperation::NanCount => {
+            let actual = execute_nanop_fixture_operation(fixture, fixture.operation)?;
             let expected = match expected {
                 ResolvedExpected::Scalar(scalar) => scalar,
-                _ => return Err("expected_scalar required for nan_sum".to_owned()),
+                _ => {
+                    return Err(format!(
+                        "expected_scalar required for {}",
+                        fixture.operation.operation_name()
+                    ));
+                }
             };
-            Ok(diff_scalar(&actual, &expected, "nan_sum"))
+            Ok(diff_scalar(
+                &actual,
+                &expected,
+                fixture.operation.operation_name(),
+            ))
         }
         FixtureOperation::FillNa => {
             let left = require_left_series(fixture)?;
@@ -4101,19 +4394,37 @@ fn execute_and_compare_differential(
             Ok(diff_values(&actual_values, &expected.values, "drop_na"))
         }
         FixtureOperation::CsvRoundTrip => {
-            let csv_input = fixture
-                .csv_input
-                .as_ref()
-                .ok_or_else(|| "csv_input is required for csv_round_trip".to_owned())?;
-            let df = read_csv_str(csv_input).map_err(|err| err.to_string())?;
-            let output = write_csv_string(&df).map_err(|err| err.to_string())?;
-            let df2 = read_csv_str(&output).map_err(|err| err.to_string())?;
-            let expected = match expected {
-                ResolvedExpected::Bool(value) => value,
-                _ => return Err("expected_bool required for csv_round_trip".to_owned()),
-            };
-            let round_trip_ok = df.column_names() == df2.column_names() && df.len() == df2.len();
-            Ok(diff_bool(round_trip_ok, expected, "csv_round_trip"))
+            let actual = execute_csv_round_trip_fixture_operation(fixture);
+            match expected {
+                ResolvedExpected::Bool(value) => Ok(diff_bool(actual?, value, "csv_round_trip")),
+                ResolvedExpected::ErrorContains(substr) => Ok(match actual {
+                    Err(message) if message.contains(&substr) => Vec::new(),
+                    Err(message) => vec![make_drift_record(
+                        ComparisonCategory::Value,
+                        DriftLevel::Critical,
+                        "csv_round_trip.error",
+                        format!(
+                            "expected csv_round_trip error containing '{substr}', got '{message}'"
+                        ),
+                    )],
+                    Ok(_) => vec![make_drift_record(
+                        ComparisonCategory::Value,
+                        DriftLevel::Critical,
+                        "csv_round_trip.error",
+                        "expected csv_round_trip to fail but operation succeeded".to_owned(),
+                    )],
+                }),
+                ResolvedExpected::ErrorAny => Ok(match actual {
+                    Err(_) => Vec::new(),
+                    Ok(_) => vec![make_drift_record(
+                        ComparisonCategory::Value,
+                        DriftLevel::Critical,
+                        "csv_round_trip.error",
+                        "expected csv_round_trip to fail but operation succeeded".to_owned(),
+                    )],
+                }),
+                _ => Err("expected_bool or expected_error required for csv_round_trip".to_owned()),
+            }
         }
         FixtureOperation::ColumnDtypeCheck => {
             let left = require_left_series(fixture)?;
@@ -4319,6 +4630,51 @@ fn execute_and_compare_differential(
                     )],
                 }),
                 _ => Err("expected_frame or expected_error required for dataframe_iloc".to_owned()),
+            }
+        }
+        FixtureOperation::DataFrameMerge
+        | FixtureOperation::DataFrameMergeIndex
+        | FixtureOperation::DataFrameConcat => {
+            let actual = execute_dataframe_fixture_operation(fixture);
+            match expected {
+                ResolvedExpected::Frame(frame) => Ok(diff_dataframe(&actual?, &frame)),
+                ResolvedExpected::ErrorContains(substr) => Ok(match actual {
+                    Err(message) if message.contains(&substr) => Vec::new(),
+                    Err(message) => vec![make_drift_record(
+                        ComparisonCategory::Value,
+                        DriftLevel::Critical,
+                        format!("{:?}.error", fixture.operation),
+                        format!(
+                            "expected {:?} error containing '{substr}', got '{message}'",
+                            fixture.operation
+                        ),
+                    )],
+                    Ok(_) => vec![make_drift_record(
+                        ComparisonCategory::Value,
+                        DriftLevel::Critical,
+                        format!("{:?}.error", fixture.operation),
+                        format!(
+                            "expected {:?} to fail but operation succeeded",
+                            fixture.operation
+                        ),
+                    )],
+                }),
+                ResolvedExpected::ErrorAny => Ok(match actual {
+                    Err(_) => Vec::new(),
+                    Ok(_) => vec![make_drift_record(
+                        ComparisonCategory::Value,
+                        DriftLevel::Critical,
+                        format!("{:?}.error", fixture.operation),
+                        format!(
+                            "expected {:?} to fail but operation succeeded",
+                            fixture.operation
+                        ),
+                    )],
+                }),
+                _ => Err(format!(
+                    "expected_frame or expected_error required for {:?}",
+                    fixture.operation
+                )),
             }
         }
         FixtureOperation::GroupByMean
@@ -6221,6 +6577,45 @@ mod tests {
         assert!(
             report.fixture_count >= 12,
             "expected FP-P2C-011 aggregate matrix fixtures"
+        );
+        assert!(report.is_green(), "expected report green: {report:?}");
+    }
+
+    #[test]
+    fn packet_filter_runs_dataframe_merge_concat_packet() {
+        let cfg = HarnessConfig::default_paths();
+        let report =
+            run_packet_by_id(&cfg, "FP-P2D-014", OracleMode::FixtureExpected).expect("report");
+        assert_eq!(report.packet_id.as_deref(), Some("FP-P2D-014"));
+        assert!(
+            report.fixture_count >= 8,
+            "expected FP-P2D-014 dataframe merge/concat fixtures"
+        );
+        assert!(report.is_green(), "expected report green: {report:?}");
+    }
+
+    #[test]
+    fn packet_filter_runs_nanops_matrix_packet() {
+        let cfg = HarnessConfig::default_paths();
+        let report =
+            run_packet_by_id(&cfg, "FP-P2D-015", OracleMode::FixtureExpected).expect("report");
+        assert_eq!(report.packet_id.as_deref(), Some("FP-P2D-015"));
+        assert!(
+            report.fixture_count >= 14,
+            "expected FP-P2D-015 nanops matrix fixtures"
+        );
+        assert!(report.is_green(), "expected report green: {report:?}");
+    }
+
+    #[test]
+    fn packet_filter_runs_csv_edge_case_packet() {
+        let cfg = HarnessConfig::default_paths();
+        let report =
+            run_packet_by_id(&cfg, "FP-P2D-016", OracleMode::FixtureExpected).expect("report");
+        assert_eq!(report.packet_id.as_deref(), Some("FP-P2D-016"));
+        assert!(
+            report.fixture_count >= 14,
+            "expected FP-P2D-016 csv edge-case fixtures"
         );
         assert!(report.is_green(), "expected report green: {report:?}");
     }
