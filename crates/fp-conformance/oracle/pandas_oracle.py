@@ -1064,7 +1064,18 @@ def op_dataframe_concat(pd, payload: dict[str, Any]) -> dict[str, Any]:
     if axis not in (0, 1):
         raise OracleError(f"dataframe_concat concat_axis must be 0 or 1, got {axis}")
 
+    join_raw = payload.get("concat_join", "outer")
+    if not isinstance(join_raw, str):
+        raise OracleError("dataframe_concat concat_join must be a string")
+    join = join_raw.lower()
+    if join not in {"outer", "inner"}:
+        raise OracleError(
+            f"dataframe_concat concat_join must be 'outer' or 'inner', got {join_raw}"
+        )
+
     if axis == 0:
+        if join == "inner":
+            raise OracleError("concat(axis=0, join='inner') is not yet supported")
         if sorted(left.columns.tolist()) != sorted(right.columns.tolist()):
             raise OracleError(
                 "dataframe_concat column mismatch: right frame columns do not match left frame"
@@ -1077,7 +1088,7 @@ def op_dataframe_concat(pd, payload: dict[str, Any]) -> dict[str, Any]:
             raise OracleError(
                 f"dataframe_concat axis=1 duplicate columns unsupported: {joined}"
             )
-        out = pd.concat([left, right], axis=1, sort=False)
+        out = pd.concat([left, right], axis=1, join=join, sort=False)
     return {"expected_frame": dataframe_to_json(out)}
 
 

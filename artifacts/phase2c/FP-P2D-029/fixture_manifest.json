@@ -1,0 +1,55 @@
+{
+  "packet_id": "FP-P2D-029",
+  "fixtures": [
+    {
+      "id": "dataframe_concat_axis1_inner_basic_strict",
+      "path": "crates/fp-conformance/fixtures/packets/fp_p2d_029_dataframe_concat_axis1_inner_basic_strict.json",
+      "class": "axis1_inner_basic"
+    },
+    {
+      "id": "dataframe_concat_axis1_inner_left_order_hardened",
+      "path": "crates/fp-conformance/fixtures/packets/fp_p2d_029_dataframe_concat_axis1_inner_left_order_hardened.json",
+      "class": "axis1_inner_left_order"
+    },
+    {
+      "id": "dataframe_concat_axis1_inner_utf8_nonmonotonic_strict",
+      "path": "crates/fp-conformance/fixtures/packets/fp_p2d_029_dataframe_concat_axis1_inner_utf8_nonmonotonic_strict.json",
+      "class": "axis1_inner_utf8_nonmonotonic"
+    },
+    {
+      "id": "dataframe_concat_axis1_inner_disjoint_empty_hardened",
+      "path": "crates/fp-conformance/fixtures/packets/fp_p2d_029_dataframe_concat_axis1_inner_disjoint_empty_hardened.json",
+      "class": "axis1_inner_disjoint_empty"
+    },
+    {
+      "id": "dataframe_concat_axis1_inner_preserves_nulls_strict",
+      "path": "crates/fp-conformance/fixtures/packets/fp_p2d_029_dataframe_concat_axis1_inner_preserves_nulls_strict.json",
+      "class": "axis1_inner_preserves_nulls"
+    },
+    {
+      "id": "dataframe_concat_axis1_inner_duplicate_column_error_strict",
+      "path": "crates/fp-conformance/fixtures/packets/fp_p2d_029_dataframe_concat_axis1_inner_duplicate_column_error_strict.json",
+      "class": "axis1_inner_duplicate_column_error"
+    },
+    {
+      "id": "dataframe_concat_axis1_inner_duplicate_column_error_hardened",
+      "path": "crates/fp-conformance/fixtures/packets/fp_p2d_029_dataframe_concat_axis1_inner_duplicate_column_error_hardened.json",
+      "class": "axis1_inner_duplicate_column_error_hardened"
+    },
+    {
+      "id": "dataframe_concat_axis1_invalid_join_error_strict",
+      "path": "crates/fp-conformance/fixtures/packets/fp_p2d_029_dataframe_concat_axis1_invalid_join_error_strict.json",
+      "class": "axis1_invalid_join_error"
+    },
+    {
+      "id": "dataframe_concat_axis0_inner_unsupported_error_strict",
+      "path": "crates/fp-conformance/fixtures/packets/fp_p2d_029_dataframe_concat_axis0_inner_unsupported_error_strict.json",
+      "class": "axis0_inner_unsupported_error"
+    },
+    {
+      "id": "dataframe_concat_axis1_inner_duplicate_index_error_hardened",
+      "path": "crates/fp-conformance/fixtures/packets/fp_p2d_029_dataframe_concat_axis1_inner_duplicate_index_error_hardened.json",
+      "class": "axis1_inner_duplicate_index_error"
+    }
+  ]
+}

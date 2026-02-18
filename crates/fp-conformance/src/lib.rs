@@ -8,7 +8,9 @@ use std::process::{Command, Stdio};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use fp_columnar::Column;
-use fp_frame::{DataFrame, FrameError, Series, concat_dataframes_with_axis, concat_series};
+use fp_frame::{
+    ConcatJoin, DataFrame, FrameError, Series, concat_dataframes_with_axis_join, concat_series,
+};
 use fp_groupby::{
     GroupByOptions, groupby_count, groupby_first, groupby_last, groupby_max, groupby_mean,
     groupby_median, groupby_min, groupby_std, groupby_sum, groupby_var,
@@ -412,6 +414,8 @@ pub struct PacketFixture {
     pub tail_n: Option<i64>,
     #[serde(default)]
     pub concat_axis: Option<i64>,
+    #[serde(default)]
+    pub concat_join: Option<String>,
     #[serde(default)]
     pub csv_input: Option<String>,
     #[serde(default)]
@@ -1116,6 +1120,8 @@ struct OracleRequest {
     tail_n: Option<i64>,
     #[serde(default)]
     concat_axis: Option<i64>,
+    #[serde(default)]
+    concat_join: Option<String>,
     #[serde(default)]
     csv_input: Option<String>,
     #[serde(default)]
@@ -3845,6 +3851,7 @@ fn capture_live_oracle_expected(
         head_n: fixture.head_n,
         tail_n: fixture.tail_n,
         concat_axis: fixture.concat_axis,
+        concat_join: fixture.concat_join.clone(),
         csv_input: fixture.csv_input.clone(),
         loc_labels: fixture.loc_labels.clone(),
         iloc_positions: fixture.iloc_positions.clone(),
@@ -4080,6 +4087,19 @@ fn normalize_concat_axis(fixture: &PacketFixture) -> Result<i64, String> {
             "concat_axis must be 0 or 1 for dataframe_concat (got {axis})"
         )),
     }
+}
+
+fn normalize_concat_join(fixture: &PacketFixture) -> Result<ConcatJoin, String> {
+    let join = fixture.concat_join.as_deref().unwrap_or("outer");
+    if join.eq_ignore_ascii_case("outer") {
+        return Ok(ConcatJoin::Outer);
+    }
+    if join.eq_ignore_ascii_case("inner") {
+        return Ok(ConcatJoin::Inner);
+    }
+    Err(format!(
+        "concat_join must be 'outer' or 'inner' for dataframe_concat (got {join})"
+    ))
 }
 
 fn require_loc_labels(fixture: &PacketFixture) -> Result<&Vec<IndexLabel>, String> {
@@ -4499,7 +4519,9 @@ fn execute_dataframe_fixture_operation(fixture: &PacketFixture) -> Result<DataFr
             let right = build_dataframe(require_frame_right(fixture)?)
                 .map_err(|err| format!("right frame build failed: {err}"))?;
             let axis = normalize_concat_axis(fixture)?;
-            concat_dataframes_with_axis(&[&left, &right], axis).map_err(|err| err.to_string())
+            let join = normalize_concat_join(fixture)?;
+            concat_dataframes_with_axis_join(&[&left, &right], axis, join)
+                .map_err(|err| err.to_string())
         }
         _ => Err(format!(
             "unsupported dataframe operation for fixture execution: {:?}",
@@ -7880,6 +7902,19 @@ mod tests {
         assert!(
             report.fixture_count >= 10,
             "expected FP-P2D-028 dataframe concat axis=1 fixtures"
+        );
+        assert!(report.is_green(), "expected report green: {report:?}");
+    }
+
+    #[test]
+    fn packet_filter_runs_dataframe_concat_axis1_inner_join_packet() {
+        let cfg = HarnessConfig::default_paths();
+        let report =
+            run_packet_by_id(&cfg, "FP-P2D-029", OracleMode::FixtureExpected).expect("report");
+        assert_eq!(report.packet_id.as_deref(), Some("FP-P2D-029"));
+        assert!(
+            report.fixture_count >= 10,
+            "expected FP-P2D-029 dataframe concat axis=1 inner-join fixtures"
         );
         assert!(report.is_green(), "expected report green: {report:?}");
     }
