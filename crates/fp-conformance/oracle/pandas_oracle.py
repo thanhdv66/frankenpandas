@@ -950,6 +950,42 @@ def op_dataframe_iloc(pd, payload: dict[str, Any]) -> dict[str, Any]:
     return {"expected_frame": dataframe_to_json(out)}
 
 
+def op_dataframe_head(pd, payload: dict[str, Any]) -> dict[str, Any]:
+    frame_payload = payload.get("frame")
+    head_n = payload.get("head_n")
+    if frame_payload is None:
+        raise OracleError("dataframe_head requires frame payload")
+    if head_n is None:
+        raise OracleError("dataframe_head requires head_n payload")
+
+    frame = dataframe_from_json(pd, frame_payload)
+    try:
+        n = int(head_n)
+    except Exception as exc:  # pragma: no cover - defensive conversion
+        raise OracleError(f"dataframe_head head_n must be an integer: {exc}") from exc
+
+    out = frame.head(n)
+    return {"expected_frame": dataframe_to_json(out)}
+
+
+def op_dataframe_tail(pd, payload: dict[str, Any]) -> dict[str, Any]:
+    frame_payload = payload.get("frame")
+    tail_n = payload.get("tail_n")
+    if frame_payload is None:
+        raise OracleError("dataframe_tail requires frame payload")
+    if tail_n is None:
+        raise OracleError("dataframe_tail requires tail_n payload")
+
+    frame = dataframe_from_json(pd, frame_payload)
+    try:
+        n = int(tail_n)
+    except Exception as exc:  # pragma: no cover - defensive conversion
+        raise OracleError(f"dataframe_tail tail_n must be an integer: {exc}") from exc
+
+    out = frame.tail(n)
+    return {"expected_frame": dataframe_to_json(out)}
+
+
 def require_join_type(payload: dict[str, Any], op_name: str) -> str:
     join_type = payload.get("join_type")
     if join_type not in {"inner", "left", "right", "outer"}:
@@ -1112,6 +1148,10 @@ def dispatch(pd, payload: dict[str, Any]) -> dict[str, Any]:
         return op_dataframe_loc(pd, payload)
     if op == "dataframe_iloc":
         return op_dataframe_iloc(pd, payload)
+    if op in {"dataframe_head", "data_frame_head"}:
+        return op_dataframe_head(pd, payload)
+    if op in {"dataframe_tail", "data_frame_tail"}:
+        return op_dataframe_tail(pd, payload)
     if op in {"dataframe_merge", "data_frame_merge"}:
         return op_dataframe_merge(pd, payload)
     if op in {"dataframe_merge_index", "data_frame_merge_index"}:

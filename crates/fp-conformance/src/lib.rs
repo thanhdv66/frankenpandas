@@ -197,6 +197,10 @@ pub enum FixtureOperation {
     DataFrameLoc,
     #[serde(rename = "dataframe_iloc", alias = "data_frame_iloc")]
     DataFrameIloc,
+    #[serde(rename = "dataframe_head", alias = "data_frame_head")]
+    DataFrameHead,
+    #[serde(rename = "dataframe_tail", alias = "data_frame_tail")]
+    DataFrameTail,
     // FP-P2D-014: DataFrame merge/join/concat parity matrix
     #[serde(rename = "dataframe_merge", alias = "data_frame_merge")]
     DataFrameMerge,
@@ -261,6 +265,8 @@ impl FixtureOperation {
             Self::SeriesIloc => "series_iloc",
             Self::DataFrameLoc => "dataframe_loc",
             Self::DataFrameIloc => "dataframe_iloc",
+            Self::DataFrameHead => "dataframe_head",
+            Self::DataFrameTail => "dataframe_tail",
             Self::DataFrameMerge => "dataframe_merge",
             Self::DataFrameMergeIndex => "dataframe_merge_index",
             Self::DataFrameConcat => "dataframe_concat",
@@ -402,6 +408,8 @@ pub struct PacketFixture {
     pub fill_value: Option<Scalar>,
     #[serde(default)]
     pub head_n: Option<usize>,
+    #[serde(default)]
+    pub tail_n: Option<usize>,
     #[serde(default)]
     pub csv_input: Option<String>,
     #[serde(default)]
@@ -629,7 +637,9 @@ fn compat_contract_rows_for_operation(operation: FixtureOperation) -> &'static [
         | FixtureOperation::SeriesLoc
         | FixtureOperation::SeriesIloc
         | FixtureOperation::DataFrameLoc
-        | FixtureOperation::DataFrameIloc => &["CC-004"],
+        | FixtureOperation::DataFrameIloc
+        | FixtureOperation::DataFrameHead
+        | FixtureOperation::DataFrameTail => &["CC-004"],
     }
 }
 
@@ -1100,6 +1110,8 @@ struct OracleRequest {
     fill_value: Option<Scalar>,
     #[serde(default)]
     head_n: Option<usize>,
+    #[serde(default)]
+    tail_n: Option<usize>,
     #[serde(default)]
     csv_input: Option<String>,
     #[serde(default)]
@@ -3442,7 +3454,9 @@ fn run_fixture_operation(
             let frame = require_frame(fixture)?;
             let labels = require_loc_labels(fixture)?;
             let frame = build_dataframe(frame)?;
-            let actual = frame.loc(labels).map_err(|err| err.to_string());
+            let actual = frame
+                .loc_with_columns(labels, fixture.column_order.as_deref())
+                .map_err(|err| err.to_string());
             match expected {
                 ResolvedExpected::Frame(frame) => compare_dataframe_expected(&actual?, &frame),
                 ResolvedExpected::ErrorContains(substr) => match actual {
@@ -3470,7 +3484,9 @@ fn run_fixture_operation(
             let frame = require_frame(fixture)?;
             let positions = require_iloc_positions(fixture)?;
             let frame = build_dataframe(frame)?;
-            let actual = frame.iloc(positions).map_err(|err| err.to_string());
+            let actual = frame
+                .iloc_with_columns(positions, fixture.column_order.as_deref())
+                .map_err(|err| err.to_string());
             match expected {
                 ResolvedExpected::Frame(frame) => compare_dataframe_expected(&actual?, &frame),
                 ResolvedExpected::ErrorContains(substr) => match actual {
@@ -3491,6 +3507,66 @@ fn run_fixture_operation(
                 }
                 _ => Err(
                     "expected_frame or expected_error is required for dataframe_iloc".to_owned(),
+                ),
+            }
+        }
+        FixtureOperation::DataFrameHead => {
+            let frame = require_frame(fixture)?;
+            let n = fixture
+                .head_n
+                .ok_or_else(|| "head_n is required for dataframe_head".to_owned())?;
+            let frame = build_dataframe(frame)?;
+            let actual = frame.head(n).map_err(|err| err.to_string());
+            match expected {
+                ResolvedExpected::Frame(frame) => compare_dataframe_expected(&actual?, &frame),
+                ResolvedExpected::ErrorContains(substr) => match actual {
+                    Err(message) if message.contains(&substr) => Ok(()),
+                    Err(message) => Err(format!(
+                        "expected dataframe_head error containing '{substr}', got '{message}'"
+                    )),
+                    Ok(_) => Err(format!(
+                        "expected dataframe_head to fail with error containing '{substr}'"
+                    )),
+                },
+                ResolvedExpected::ErrorAny => {
+                    if actual.is_err() {
+                        Ok(())
+                    } else {
+                        Err("expected dataframe_head to fail but operation succeeded".to_owned())
+                    }
+                }
+                _ => Err(
+                    "expected_frame or expected_error is required for dataframe_head".to_owned(),
+                ),
+            }
+        }
+        FixtureOperation::DataFrameTail => {
+            let frame = require_frame(fixture)?;
+            let n = fixture
+                .tail_n
+                .ok_or_else(|| "tail_n is required for dataframe_tail".to_owned())?;
+            let frame = build_dataframe(frame)?;
+            let actual = frame.tail(n).map_err(|err| err.to_string());
+            match expected {
+                ResolvedExpected::Frame(frame) => compare_dataframe_expected(&actual?, &frame),
+                ResolvedExpected::ErrorContains(substr) => match actual {
+                    Err(message) if message.contains(&substr) => Ok(()),
+                    Err(message) => Err(format!(
+                        "expected dataframe_tail error containing '{substr}', got '{message}'"
+                    )),
+                    Ok(_) => Err(format!(
+                        "expected dataframe_tail to fail with error containing '{substr}'"
+                    )),
+                },
+                ResolvedExpected::ErrorAny => {
+                    if actual.is_err() {
+                        Ok(())
+                    } else {
+                        Err("expected dataframe_tail to fail but operation succeeded".to_owned())
+                    }
+                }
+                _ => Err(
+                    "expected_frame or expected_error is required for dataframe_tail".to_owned(),
                 ),
             }
         }
@@ -3668,6 +3744,8 @@ fn fixture_expected(fixture: &PacketFixture) -> Result<ResolvedExpected, Harness
             }),
         FixtureOperation::DataFrameLoc
         | FixtureOperation::DataFrameIloc
+        | FixtureOperation::DataFrameHead
+        | FixtureOperation::DataFrameTail
         | FixtureOperation::DataFrameFromSeries
         | FixtureOperation::DataFrameFromDict
         | FixtureOperation::DataFrameFromRecords
@@ -3761,6 +3839,7 @@ fn capture_live_oracle_expected(
         merge_on: fixture.merge_on.clone(),
         fill_value: fixture.fill_value.clone(),
         head_n: fixture.head_n,
+        tail_n: fixture.tail_n,
         csv_input: fixture.csv_input.clone(),
         loc_labels: fixture.loc_labels.clone(),
         iloc_positions: fixture.iloc_positions.clone(),
@@ -3881,6 +3960,8 @@ fn capture_live_oracle_expected(
             }),
         FixtureOperation::DataFrameLoc
         | FixtureOperation::DataFrameIloc
+        | FixtureOperation::DataFrameHead
+        | FixtureOperation::DataFrameTail
         | FixtureOperation::DataFrameFromSeries
         | FixtureOperation::DataFrameFromDict
         | FixtureOperation::DataFrameFromRecords
@@ -5487,7 +5568,9 @@ fn execute_and_compare_differential(
             let frame = require_frame(fixture)?;
             let labels = require_loc_labels(fixture)?;
             let frame = build_dataframe(frame)?;
-            let actual = frame.loc(labels).map_err(|err| err.to_string());
+            let actual = frame
+                .loc_with_columns(labels, fixture.column_order.as_deref())
+                .map_err(|err| err.to_string());
             match expected {
                 ResolvedExpected::Frame(frame) => Ok(diff_dataframe(&actual?, &frame)),
                 ResolvedExpected::ErrorContains(substr) => Ok(match actual {
@@ -5523,7 +5606,9 @@ fn execute_and_compare_differential(
             let frame = require_frame(fixture)?;
             let positions = require_iloc_positions(fixture)?;
             let frame = build_dataframe(frame)?;
-            let actual = frame.iloc(positions).map_err(|err| err.to_string());
+            let actual = frame
+                .iloc_with_columns(positions, fixture.column_order.as_deref())
+                .map_err(|err| err.to_string());
             match expected {
                 ResolvedExpected::Frame(frame) => Ok(diff_dataframe(&actual?, &frame)),
                 ResolvedExpected::ErrorContains(substr) => Ok(match actual {
@@ -5553,6 +5638,82 @@ fn execute_and_compare_differential(
                     )],
                 }),
                 _ => Err("expected_frame or expected_error required for dataframe_iloc".to_owned()),
+            }
+        }
+        FixtureOperation::DataFrameHead => {
+            let frame = require_frame(fixture)?;
+            let n = fixture
+                .head_n
+                .ok_or_else(|| "head_n is required for dataframe_head".to_owned())?;
+            let frame = build_dataframe(frame)?;
+            let actual = frame.head(n).map_err(|err| err.to_string());
+            match expected {
+                ResolvedExpected::Frame(frame) => Ok(diff_dataframe(&actual?, &frame)),
+                ResolvedExpected::ErrorContains(substr) => Ok(match actual {
+                    Err(message) if message.contains(&substr) => Vec::new(),
+                    Err(message) => vec![make_drift_record(
+                        ComparisonCategory::Value,
+                        DriftLevel::Critical,
+                        "dataframe_head.error",
+                        format!(
+                            "expected dataframe_head error containing '{substr}', got '{message}'"
+                        ),
+                    )],
+                    Ok(_) => vec![make_drift_record(
+                        ComparisonCategory::Value,
+                        DriftLevel::Critical,
+                        "dataframe_head.error",
+                        "expected dataframe_head to fail but operation succeeded".to_owned(),
+                    )],
+                }),
+                ResolvedExpected::ErrorAny => Ok(match actual {
+                    Err(_) => Vec::new(),
+                    Ok(_) => vec![make_drift_record(
+                        ComparisonCategory::Value,
+                        DriftLevel::Critical,
+                        "dataframe_head.error",
+                        "expected dataframe_head to fail but operation succeeded".to_owned(),
+                    )],
+                }),
+                _ => Err("expected_frame or expected_error required for dataframe_head".to_owned()),
+            }
+        }
+        FixtureOperation::DataFrameTail => {
+            let frame = require_frame(fixture)?;
+            let n = fixture
+                .tail_n
+                .ok_or_else(|| "tail_n is required for dataframe_tail".to_owned())?;
+            let frame = build_dataframe(frame)?;
+            let actual = frame.tail(n).map_err(|err| err.to_string());
+            match expected {
+                ResolvedExpected::Frame(frame) => Ok(diff_dataframe(&actual?, &frame)),
+                ResolvedExpected::ErrorContains(substr) => Ok(match actual {
+                    Err(message) if message.contains(&substr) => Vec::new(),
+                    Err(message) => vec![make_drift_record(
+                        ComparisonCategory::Value,
+                        DriftLevel::Critical,
+                        "dataframe_tail.error",
+                        format!(
+                            "expected dataframe_tail error containing '{substr}', got '{message}'"
+                        ),
+                    )],
+                    Ok(_) => vec![make_drift_record(
+                        ComparisonCategory::Value,
+                        DriftLevel::Critical,
+                        "dataframe_tail.error",
+                        "expected dataframe_tail to fail but operation succeeded".to_owned(),
+                    )],
+                }),
+                ResolvedExpected::ErrorAny => Ok(match actual {
+                    Err(_) => Vec::new(),
+                    Ok(_) => vec![make_drift_record(
+                        ComparisonCategory::Value,
+                        DriftLevel::Critical,
+                        "dataframe_tail.error",
+                        "expected dataframe_tail to fail but operation succeeded".to_owned(),
+                    )],
+                }),
+                _ => Err("expected_frame or expected_error required for dataframe_tail".to_owned()),
             }
         }
         FixtureOperation::DataFrameMerge
@@ -7643,6 +7804,32 @@ mod tests {
         assert!(
             report.fixture_count >= 10,
             "expected FP-P2D-024 constructor dtype-spec normalization fixtures"
+        );
+        assert!(report.is_green(), "expected report green: {report:?}");
+    }
+
+    #[test]
+    fn packet_filter_runs_dataframe_loc_iloc_multi_axis_packet() {
+        let cfg = HarnessConfig::default_paths();
+        let report =
+            run_packet_by_id(&cfg, "FP-P2D-025", OracleMode::FixtureExpected).expect("report");
+        assert_eq!(report.packet_id.as_deref(), Some("FP-P2D-025"));
+        assert!(
+            report.fixture_count >= 10,
+            "expected FP-P2D-025 dataframe loc/iloc multi-axis fixtures"
+        );
+        assert!(report.is_green(), "expected report green: {report:?}");
+    }
+
+    #[test]
+    fn packet_filter_runs_dataframe_head_tail_packet() {
+        let cfg = HarnessConfig::default_paths();
+        let report =
+            run_packet_by_id(&cfg, "FP-P2D-026", OracleMode::FixtureExpected).expect("report");
+        assert_eq!(report.packet_id.as_deref(), Some("FP-P2D-026"));
+        assert!(
+            report.fixture_count >= 10,
+            "expected FP-P2D-026 dataframe head/tail fixtures"
         );
         assert!(report.is_green(), "expected report green: {report:?}");
     }

@@ -1,0 +1,55 @@
+{
+  "packet_id": "FP-P2D-026",
+  "fixtures": [
+    {
+      "id": "dataframe_head_basic_strict",
+      "path": "crates/fp-conformance/fixtures/packets/fp_p2d_026_dataframe_head_basic_strict.json",
+      "class": "head_basic"
+    },
+    {
+      "id": "dataframe_tail_basic_strict",
+      "path": "crates/fp-conformance/fixtures/packets/fp_p2d_026_dataframe_tail_basic_strict.json",
+      "class": "tail_basic"
+    },
+    {
+      "id": "dataframe_head_n_exceeds_len_hardened",
+      "path": "crates/fp-conformance/fixtures/packets/fp_p2d_026_dataframe_head_n_exceeds_len_hardened.json",
+      "class": "head_n_exceeds_len"
+    },
+    {
+      "id": "dataframe_tail_n_exceeds_len_hardened",
+      "path": "crates/fp-conformance/fixtures/packets/fp_p2d_026_dataframe_tail_n_exceeds_len_hardened.json",
+      "class": "tail_n_exceeds_len"
+    },
+    {
+      "id": "dataframe_head_zero_rows_strict",
+      "path": "crates/fp-conformance/fixtures/packets/fp_p2d_026_dataframe_head_zero_rows_strict.json",
+      "class": "head_zero_rows"
+    },
+    {
+      "id": "dataframe_tail_zero_rows_strict",
+      "path": "crates/fp-conformance/fixtures/packets/fp_p2d_026_dataframe_tail_zero_rows_strict.json",
+      "class": "tail_zero_rows"
+    },
+    {
+      "id": "dataframe_head_preserves_nulls_hardened",
+      "path": "crates/fp-conformance/fixtures/packets/fp_p2d_026_dataframe_head_preserves_nulls_hardened.json",
+      "class": "head_preserves_nulls"
+    },
+    {
+      "id": "dataframe_tail_preserves_nulls_hardened",
+      "path": "crates/fp-conformance/fixtures/packets/fp_p2d_026_dataframe_tail_preserves_nulls_hardened.json",
+      "class": "tail_preserves_nulls"
+    },
+    {
+      "id": "dataframe_head_single_row_mixed_dtypes_strict",
+      "path": "crates/fp-conformance/fixtures/packets/fp_p2d_026_dataframe_head_single_row_mixed_dtypes_strict.json",
+      "class": "head_single_row_mixed_dtypes"
+    },
+    {
+      "id": "dataframe_tail_single_row_mixed_dtypes_strict",
+      "path": "crates/fp-conformance/fixtures/packets/fp_p2d_026_dataframe_tail_single_row_mixed_dtypes_strict.json",
+      "class": "tail_single_row_mixed_dtypes"
+    }
+  ]
+}

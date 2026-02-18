@@ -1,0 +1,47 @@
+{
+  "packet_id": "FP-P2D-026",
+  "case_id": "dataframe_tail_single_row_mixed_dtypes_strict",
+  "mode": "strict",
+  "operation": "dataframe_tail",
+  "frame": {
+    "index": [
+      { "kind": "int64", "value": 10 },
+      { "kind": "int64", "value": 20 },
+      { "kind": "int64", "value": 30 }
+    ],
+    "columns": {
+      "a": [
+        { "kind": "int64", "value": 100 },
+        { "kind": "int64", "value": 200 },
+        { "kind": "int64", "value": 300 }
+      ],
+      "b": [
+        { "kind": "utf8", "value": "alpha" },
+        { "kind": "utf8", "value": "beta" },
+        { "kind": "utf8", "value": "gamma" }
+      ],
+      "flag": [
+        { "kind": "bool", "value": true },
+        { "kind": "bool", "value": false },
+        { "kind": "bool", "value": true }
+      ]
+    }
+  },
+  "tail_n": 1,
+  "expected_frame": {
+    "index": [
+      { "kind": "int64", "value": 30 }
+    ],
+    "columns": {
+      "a": [
+        { "kind": "int64", "value": 300 }
+      ],
+      "b": [
+        { "kind": "utf8", "value": "gamma" }
+      ],
+      "flag": [
+        { "kind": "bool", "value": true }
+      ]
+    }
+  }
+}

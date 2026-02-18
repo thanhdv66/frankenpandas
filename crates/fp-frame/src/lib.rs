@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use fp_columnar::{ArithmeticOp, Column, ColumnError, ComparisonOp};
 use fp_index::{
@@ -703,6 +703,33 @@ pub struct DataFrame {
 }
 
 impl DataFrame {
+    fn resolve_column_selector(
+        &self,
+        column_selector: Option<&[String]>,
+    ) -> Result<Vec<String>, FrameError> {
+        let Some(requested_columns) = column_selector else {
+            return Ok(self.columns.keys().cloned().collect());
+        };
+
+        let mut selected = Vec::with_capacity(requested_columns.len());
+        let mut seen = BTreeSet::new();
+        for requested in requested_columns {
+            if !self.columns.contains_key(requested) {
+                return Err(FrameError::CompatibilityRejected(format!(
+                    "column '{requested}' not found"
+                )));
+            }
+            if !seen.insert(requested.clone()) {
+                return Err(FrameError::CompatibilityRejected(format!(
+                    "duplicate column selector: '{requested}'"
+                )));
+            }
+            selected.push(requested.clone());
+        }
+
+        Ok(selected)
+    }
+
     pub fn new(index: Index, columns: BTreeMap<String, Column>) -> Result<Self, FrameError> {
         for column in columns.values() {
             if column.len() != index.len() {
@@ -961,6 +988,19 @@ impl DataFrame {
     /// returned in selector order and duplicate labels are preserved.
     /// Missing labels fail closed.
     pub fn loc(&self, labels: &[IndexLabel]) -> Result<Self, FrameError> {
+        self.loc_with_columns(labels, None)
+    }
+
+    /// Label-based row+column selection for list-like indexers.
+    ///
+    /// Matches `df.loc[[...], [...]]` for list selectors. Requested rows are
+    /// returned in selector order and duplicate row labels are preserved.
+    /// Missing labels/columns fail closed.
+    pub fn loc_with_columns(
+        &self,
+        labels: &[IndexLabel],
+        column_selector: Option<&[String]>,
+    ) -> Result<Self, FrameError> {
         let mut positions = Vec::new();
         let mut out_labels = Vec::new();
 
@@ -980,13 +1020,17 @@ impl DataFrame {
             }
         }
 
+        let selected_columns = self.resolve_column_selector(column_selector)?;
         let mut columns = BTreeMap::new();
-        for (name, column) in &self.columns {
+        for name in selected_columns {
+            let column = self.columns.get(&name).ok_or_else(|| {
+                FrameError::CompatibilityRejected(format!("column '{name}' not found"))
+            })?;
             let mut values = Vec::with_capacity(positions.len());
             for &position in &positions {
                 values.push(column.values()[position].clone());
             }
-            columns.insert(name.clone(), Column::from_values(values)?);
+            columns.insert(name, Column::from_values(values)?);
         }
 
         Self::new(Index::new(out_labels), columns)
@@ -998,6 +1042,19 @@ impl DataFrame {
     /// returned in selector order and duplicates are preserved.
     /// Negative positions are resolved from the end of the DataFrame.
     pub fn iloc(&self, positions: &[i64]) -> Result<Self, FrameError> {
+        self.iloc_with_columns(positions, None)
+    }
+
+    /// Position-based row+column selection for list-like indexers.
+    ///
+    /// Matches `df.iloc[[...], [...]]` for list selectors. Requested rows are
+    /// returned in selector order and duplicates are preserved.
+    /// Missing columns fail closed.
+    pub fn iloc_with_columns(
+        &self,
+        positions: &[i64],
+        column_selector: Option<&[String]>,
+    ) -> Result<Self, FrameError> {
         let normalized_positions = positions
             .iter()
             .copied()
@@ -1009,13 +1066,17 @@ impl DataFrame {
             out_labels.push(self.index.labels()[position].clone());
         }
 
+        let selected_columns = self.resolve_column_selector(column_selector)?;
         let mut columns = BTreeMap::new();
-        for (name, column) in &self.columns {
+        for name in selected_columns {
+            let column = self.columns.get(&name).ok_or_else(|| {
+                FrameError::CompatibilityRejected(format!("column '{name}' not found"))
+            })?;
             let mut values = Vec::with_capacity(normalized_positions.len());
             for &position in &normalized_positions {
                 values.push(column.values()[position].clone());
             }
-            columns.insert(name.clone(), Column::from_values(values)?);
+            columns.insert(name, Column::from_values(values)?);
         }
 
         Self::new(Index::new(out_labels), columns)
@@ -2721,6 +2782,69 @@ mod tests {
     }
 
     #[test]
+    fn dataframe_loc_with_columns_selects_row_and_column_subsets() {
+        let df = DataFrame::from_dict_with_index(
+            vec![
+                (
+                    "a",
+                    vec![Scalar::Int64(10), Scalar::Int64(20), Scalar::Int64(30)],
+                ),
+                (
+                    "b",
+                    vec![Scalar::Int64(100), Scalar::Int64(200), Scalar::Int64(300)],
+                ),
+                (
+                    "c",
+                    vec![
+                        Scalar::Utf8("x".to_owned()),
+                        Scalar::Utf8("y".to_owned()),
+                        Scalar::Utf8("z".to_owned()),
+                    ],
+                ),
+            ],
+            vec!["r1".into(), "r2".into(), "r3".into()],
+        )
+        .unwrap();
+
+        let selected = df
+            .loc_with_columns(
+                &["r3".into(), "r1".into()],
+                Some(&["c".to_owned(), "a".to_owned()]),
+            )
+            .unwrap();
+
+        assert_eq!(
+            selected.index().labels(),
+            &[IndexLabel::from("r3"), IndexLabel::from("r1")]
+        );
+        assert_eq!(
+            selected.column("a").unwrap().values(),
+            &[Scalar::Int64(30), Scalar::Int64(10)]
+        );
+        assert_eq!(
+            selected.column("c").unwrap().values(),
+            &[Scalar::Utf8("z".to_owned()), Scalar::Utf8("x".to_owned())]
+        );
+        assert!(selected.column("b").is_none());
+    }
+
+    #[test]
+    fn dataframe_loc_with_columns_missing_column_is_rejected() {
+        let df = DataFrame::from_dict_with_index(
+            vec![("a", vec![Scalar::Int64(1), Scalar::Int64(2)])],
+            vec!["x".into(), "y".into()],
+        )
+        .unwrap();
+
+        let err = df
+            .loc_with_columns(&["x".into()], Some(&["missing".to_owned()]))
+            .unwrap_err();
+        assert!(
+            matches!(err, FrameError::CompatibilityRejected(msg) if msg.contains("column 'missing' not found"))
+        );
+    }
+
+    #[test]
     fn dataframe_iloc_selects_positions_in_request_order_with_duplicates() {
         let df = DataFrame::from_dict_with_index(
             vec![
@@ -2853,6 +2977,60 @@ mod tests {
         let err = df.iloc(&[-2]).unwrap_err();
         assert!(
             matches!(err, FrameError::CompatibilityRejected(msg) if msg.contains("out of bounds"))
+        );
+    }
+
+    #[test]
+    fn dataframe_iloc_with_columns_selects_row_and_column_subsets() {
+        let df = DataFrame::from_dict_with_index(
+            vec![
+                (
+                    "a",
+                    vec![Scalar::Int64(10), Scalar::Int64(20), Scalar::Int64(30)],
+                ),
+                (
+                    "b",
+                    vec![Scalar::Int64(100), Scalar::Int64(200), Scalar::Int64(300)],
+                ),
+                (
+                    "c",
+                    vec![
+                        Scalar::Utf8("x".to_owned()),
+                        Scalar::Utf8("y".to_owned()),
+                        Scalar::Utf8("z".to_owned()),
+                    ],
+                ),
+            ],
+            vec!["r1".into(), "r2".into(), "r3".into()],
+        )
+        .unwrap();
+
+        let selected = df
+            .iloc_with_columns(&[-1, 0], Some(&["b".to_owned(), "a".to_owned()]))
+            .unwrap();
+        assert_eq!(
+            selected.index().labels(),
+            &[IndexLabel::from("r3"), IndexLabel::from("r1")]
+        );
+        assert_eq!(
+            selected.column("a").unwrap().values(),
+            &[Scalar::Int64(30), Scalar::Int64(10)]
+        );
+        assert_eq!(
+            selected.column("b").unwrap().values(),
+            &[Scalar::Int64(300), Scalar::Int64(100)]
+        );
+        assert!(selected.column("c").is_none());
+    }
+
+    #[test]
+    fn dataframe_iloc_with_columns_duplicate_selector_is_rejected() {
+        let df = DataFrame::from_dict(&["a"], vec![("a", vec![Scalar::Int64(10)])]).unwrap();
+        let err = df
+            .iloc_with_columns(&[0], Some(&["a".to_owned(), "a".to_owned()]))
+            .unwrap_err();
+        assert!(
+            matches!(err, FrameError::CompatibilityRejected(msg) if msg.contains("duplicate column selector"))
         );
     }
 

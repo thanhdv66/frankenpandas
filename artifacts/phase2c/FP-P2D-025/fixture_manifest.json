@@ -1,0 +1,55 @@
+{
+  "packet_id": "FP-P2D-025",
+  "fixtures": [
+    {
+      "id": "dataframe_loc_row_column_subset_strict",
+      "path": "crates/fp-conformance/fixtures/packets/fp_p2d_025_dataframe_loc_row_column_subset_strict.json",
+      "class": "loc_row_column_subset"
+    },
+    {
+      "id": "dataframe_loc_duplicate_rows_hardened",
+      "path": "crates/fp-conformance/fixtures/packets/fp_p2d_025_dataframe_loc_duplicate_rows_hardened.json",
+      "class": "loc_duplicate_rows"
+    },
+    {
+      "id": "dataframe_loc_missing_label_error_strict",
+      "path": "crates/fp-conformance/fixtures/packets/fp_p2d_025_dataframe_loc_missing_label_error_strict.json",
+      "class": "loc_missing_label_error"
+    },
+    {
+      "id": "dataframe_loc_missing_column_error_hardened",
+      "path": "crates/fp-conformance/fixtures/packets/fp_p2d_025_dataframe_loc_missing_column_error_hardened.json",
+      "class": "loc_missing_column_error"
+    },
+    {
+      "id": "dataframe_loc_empty_column_selector_strict",
+      "path": "crates/fp-conformance/fixtures/packets/fp_p2d_025_dataframe_loc_empty_column_selector_strict.json",
+      "class": "loc_empty_column_selector"
+    },
+    {
+      "id": "dataframe_iloc_row_column_subset_strict",
+      "path": "crates/fp-conformance/fixtures/packets/fp_p2d_025_dataframe_iloc_row_column_subset_strict.json",
+      "class": "iloc_row_column_subset"
+    },
+    {
+      "id": "dataframe_iloc_negative_with_columns_hardened",
+      "path": "crates/fp-conformance/fixtures/packets/fp_p2d_025_dataframe_iloc_negative_with_columns_hardened.json",
+      "class": "iloc_negative_with_columns"
+    },
+    {
+      "id": "dataframe_iloc_out_of_bounds_error_strict",
+      "path": "crates/fp-conformance/fixtures/packets/fp_p2d_025_dataframe_iloc_out_of_bounds_error_strict.json",
+      "class": "iloc_out_of_bounds_error"
+    },
+    {
+      "id": "dataframe_iloc_missing_column_error_hardened",
+      "path": "crates/fp-conformance/fixtures/packets/fp_p2d_025_dataframe_iloc_missing_column_error_hardened.json",
+      "class": "iloc_missing_column_error"
+    },
+    {
+      "id": "dataframe_iloc_duplicate_column_selector_error_strict",
+      "path": "crates/fp-conformance/fixtures/packets/fp_p2d_025_dataframe_iloc_duplicate_column_selector_error_strict.json",
+      "class": "iloc_duplicate_column_selector_error"
+    }
+  ]
+}
