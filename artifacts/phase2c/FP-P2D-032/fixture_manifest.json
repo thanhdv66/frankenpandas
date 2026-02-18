@@ -1,0 +1,55 @@
+{
+  "packet_id": "FP-P2D-032",
+  "fixtures": [
+    {
+      "id": "dataframe_concat_axis0_outer_basic_column_order_strict",
+      "path": "crates/fp-conformance/fixtures/packets/fp_p2d_032_dataframe_concat_axis0_outer_basic_column_order_strict.json",
+      "class": "axis0_outer_basic_column_order"
+    },
+    {
+      "id": "dataframe_concat_axis0_outer_disjoint_column_order_hardened",
+      "path": "crates/fp-conformance/fixtures/packets/fp_p2d_032_dataframe_concat_axis0_outer_disjoint_column_order_hardened.json",
+      "class": "axis0_outer_disjoint_column_order"
+    },
+    {
+      "id": "dataframe_concat_axis0_outer_empty_left_schema_order_hardened",
+      "path": "crates/fp-conformance/fixtures/packets/fp_p2d_032_dataframe_concat_axis0_outer_empty_left_schema_order_hardened.json",
+      "class": "axis0_outer_empty_left_schema_order"
+    },
+    {
+      "id": "dataframe_concat_axis0_outer_empty_right_schema_order_strict",
+      "path": "crates/fp-conformance/fixtures/packets/fp_p2d_032_dataframe_concat_axis0_outer_empty_right_schema_order_strict.json",
+      "class": "axis0_outer_empty_right_schema_order"
+    },
+    {
+      "id": "dataframe_concat_axis0_outer_preserves_nulls_order_strict",
+      "path": "crates/fp-conformance/fixtures/packets/fp_p2d_032_dataframe_concat_axis0_outer_preserves_nulls_order_strict.json",
+      "class": "axis0_outer_preserves_nulls_order"
+    },
+    {
+      "id": "dataframe_concat_axis0_outer_utf8_column_order_strict",
+      "path": "crates/fp-conformance/fixtures/packets/fp_p2d_032_dataframe_concat_axis0_outer_utf8_column_order_strict.json",
+      "class": "axis0_outer_utf8_column_order"
+    },
+    {
+      "id": "dataframe_concat_axis0_outer_duplicate_index_order_hardened",
+      "path": "crates/fp-conformance/fixtures/packets/fp_p2d_032_dataframe_concat_axis0_outer_duplicate_index_order_hardened.json",
+      "class": "axis0_outer_duplicate_index_order"
+    },
+    {
+      "id": "dataframe_concat_axis0_outer_identical_columns_left_order_strict",
+      "path": "crates/fp-conformance/fixtures/packets/fp_p2d_032_dataframe_concat_axis0_outer_identical_columns_left_order_strict.json",
+      "class": "axis0_outer_identical_columns_left_order"
+    },
+    {
+      "id": "dataframe_concat_axis0_invalid_join_error_strict",
+      "path": "crates/fp-conformance/fixtures/packets/fp_p2d_032_dataframe_concat_axis0_invalid_join_error_strict.json",
+      "class": "axis0_invalid_join_error"
+    },
+    {
+      "id": "dataframe_concat_invalid_axis_error_hardened",
+      "path": "crates/fp-conformance/fixtures/packets/fp_p2d_032_dataframe_concat_invalid_axis_error_hardened.json",
+      "class": "axis0_invalid_axis_error"
+    }
+  ]
+}

@@ -1,0 +1,45 @@
+{
+  "packet_id": "FP-P2D-031",
+  "case_id": "dataframe_concat_axis0_outer_utf8_overlap_strict",
+  "mode": "strict",
+  "operation": "dataframe_concat",
+  "concat_axis": 0,
+  "concat_join": "outer",
+  "frame": {
+    "index": [
+      { "kind": "utf8", "value": "r1" }
+    ],
+    "columns": {
+      "city": [
+        { "kind": "utf8", "value": "nyc" }
+      ]
+    }
+  },
+  "frame_right": {
+    "index": [
+      { "kind": "utf8", "value": "r2" }
+    ],
+    "columns": {
+      "score": [
+        { "kind": "int64", "value": 99 }
+      ]
+    }
+  },
+  "expected_frame": {
+    "index": [
+      { "kind": "utf8", "value": "r1" },
+      { "kind": "utf8", "value": "r2" }
+    ],
+    "columns": {
+      "city": [
+        { "kind": "utf8", "value": "nyc" },
+        { "kind": "null", "value": "null" }
+      ],
+      "score": [
+        { "kind": "null", "value": "null" },
+        { "kind": "int64", "value": 99 }
+      ]
+    }
+  }
+}
+

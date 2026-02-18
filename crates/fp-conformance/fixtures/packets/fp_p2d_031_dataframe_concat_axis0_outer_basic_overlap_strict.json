@@ -1,0 +1,68 @@
+{
+  "packet_id": "FP-P2D-031",
+  "case_id": "dataframe_concat_axis0_outer_basic_overlap_strict",
+  "mode": "strict",
+  "operation": "dataframe_concat",
+  "concat_axis": 0,
+  "concat_join": "outer",
+  "frame": {
+    "index": [
+      { "kind": "int64", "value": 0 },
+      { "kind": "int64", "value": 1 }
+    ],
+    "columns": {
+      "a": [
+        { "kind": "int64", "value": 1 },
+        { "kind": "int64", "value": 2 }
+      ],
+      "b": [
+        { "kind": "int64", "value": 10 },
+        { "kind": "int64", "value": 20 }
+      ]
+    }
+  },
+  "frame_right": {
+    "index": [
+      { "kind": "int64", "value": 2 },
+      { "kind": "int64", "value": 3 }
+    ],
+    "columns": {
+      "b": [
+        { "kind": "int64", "value": 30 },
+        { "kind": "int64", "value": 40 }
+      ],
+      "c": [
+        { "kind": "int64", "value": 300 },
+        { "kind": "int64", "value": 400 }
+      ]
+    }
+  },
+  "expected_frame": {
+    "index": [
+      { "kind": "int64", "value": 0 },
+      { "kind": "int64", "value": 1 },
+      { "kind": "int64", "value": 2 },
+      { "kind": "int64", "value": 3 }
+    ],
+    "columns": {
+      "a": [
+        { "kind": "int64", "value": 1 },
+        { "kind": "int64", "value": 2 },
+        { "kind": "null", "value": "null" },
+        { "kind": "null", "value": "null" }
+      ],
+      "b": [
+        { "kind": "int64", "value": 10 },
+        { "kind": "int64", "value": 20 },
+        { "kind": "int64", "value": 30 },
+        { "kind": "int64", "value": 40 }
+      ],
+      "c": [
+        { "kind": "null", "value": "null" },
+        { "kind": "null", "value": "null" },
+        { "kind": "int64", "value": 300 },
+        { "kind": "int64", "value": 400 }
+      ]
+    }
+  }
+}

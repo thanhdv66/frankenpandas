@@ -1,0 +1,45 @@
+{
+  "packet_id": "FP-P2D-032",
+  "case_id": "dataframe_concat_axis0_outer_preserves_nulls_order_strict",
+  "mode": "strict",
+  "operation": "dataframe_concat",
+  "concat_axis": 0,
+  "concat_join": "outer",
+  "frame": {
+    "index": [{ "kind": "int64", "value": 0 }],
+    "column_order": ["b", "a"],
+    "columns": {
+      "a": [{ "kind": "null", "value": "null" }],
+      "b": [{ "kind": "int64", "value": 5 }]
+    }
+  },
+  "frame_right": {
+    "index": [{ "kind": "int64", "value": 1 }],
+    "column_order": ["c", "a"],
+    "columns": {
+      "a": [{ "kind": "int64", "value": 7 }],
+      "c": [{ "kind": "null", "value": "null" }]
+    }
+  },
+  "expected_frame": {
+    "index": [
+      { "kind": "int64", "value": 0 },
+      { "kind": "int64", "value": 1 }
+    ],
+    "column_order": ["b", "a", "c"],
+    "columns": {
+      "a": [
+        { "kind": "null", "value": "null" },
+        { "kind": "int64", "value": 7 }
+      ],
+      "b": [
+        { "kind": "int64", "value": 5 },
+        { "kind": "null", "value": "null" }
+      ],
+      "c": [
+        { "kind": "null", "value": "null" },
+        { "kind": "null", "value": "null" }
+      ]
+    }
+  }
+}

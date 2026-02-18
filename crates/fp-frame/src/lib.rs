@@ -685,24 +685,13 @@ pub fn concat_series(series_list: &[&Series]) -> Result<Series, FrameError> {
 /// Concatenate DataFrames along axis 0 (row-wise).
 ///
 /// Matches `pd.concat([df1, df2, ...], axis=0)` semantics:
-/// - All DataFrames must share the same column names.
+/// - Output columns are the union of input columns (`join='outer'`).
 /// - Index labels are concatenated in order (duplicates preserved).
+/// - Missing cells materialize as `Scalar::Null`.
 /// - Empty input returns an empty DataFrame.
 pub fn concat_dataframes(frames: &[&DataFrame]) -> Result<DataFrame, FrameError> {
     if frames.is_empty() {
         return DataFrame::new(Index::new(Vec::new()), BTreeMap::new());
-    }
-
-    let col_names: Vec<&String> = frames[0].columns().keys().collect();
-
-    // Verify all frames have the same columns.
-    for (i, frame) in frames.iter().enumerate().skip(1) {
-        let frame_cols: Vec<&String> = frame.columns().keys().collect();
-        if frame_cols != col_names {
-            return Err(FrameError::CompatibilityRejected(format!(
-                "frame[{i}] columns do not match frame[0]"
-            )));
-        }
     }
 
     // Concatenate index labels.
@@ -713,17 +702,34 @@ pub fn concat_dataframes(frames: &[&DataFrame]) -> Result<DataFrame, FrameError>
     }
     let index = Index::new(labels);
 
-    // Concatenate each column.
-    let mut columns = BTreeMap::new();
-    for col_name in &col_names {
-        let mut values = Vec::with_capacity(total_len);
-        for frame in frames {
-            values.extend_from_slice(frame.column(col_name).unwrap().values());
+    // Materialize union-column output with null fill for missing frame columns.
+    // Preserve first-seen column order (`sort=False` pandas semantics).
+    let mut union_columns = Vec::new();
+    let mut seen = BTreeSet::new();
+    for frame in frames {
+        for name in frame.column_names() {
+            if seen.insert(name.clone()) {
+                union_columns.push(name.clone());
+            }
         }
-        columns.insert((*col_name).clone(), Column::from_values(values)?);
     }
 
-    DataFrame::new(index, columns)
+    let mut columns = BTreeMap::new();
+    for col_name in &union_columns {
+        let mut values = Vec::with_capacity(total_len);
+        for frame in frames {
+            if let Some(column) = frame.column(col_name) {
+                values.extend_from_slice(column.values());
+            } else {
+                for _ in 0..frame.len() {
+                    values.push(Scalar::Null(NullKind::Null));
+                }
+            }
+        }
+        columns.insert(col_name.clone(), Column::from_values(values)?);
+    }
+
+    DataFrame::new_with_column_order(index, columns, union_columns)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -772,9 +778,13 @@ fn concat_dataframes_axis0_inner(frames: &[&DataFrame]) -> Result<DataFrame, Fra
         return DataFrame::new(Index::new(Vec::new()), BTreeMap::new());
     }
 
-    let mut shared_columns: Vec<String> = frames[0].columns().keys().cloned().collect();
+    let mut shared_columns: Vec<String> = frames[0].column_names().into_iter().cloned().collect();
     for frame in frames.iter().skip(1) {
-        let frame_columns: BTreeSet<&str> = frame.columns().keys().map(String::as_str).collect();
+        let frame_columns: BTreeSet<&str> = frame
+            .column_names()
+            .into_iter()
+            .map(String::as_str)
+            .collect();
         shared_columns.retain(|name| frame_columns.contains(name.as_str()));
     }
 
@@ -786,20 +796,20 @@ fn concat_dataframes_axis0_inner(frames: &[&DataFrame]) -> Result<DataFrame, Fra
     let index = Index::new(labels);
 
     let mut columns = BTreeMap::new();
-    for name in shared_columns {
+    for name in &shared_columns {
         let mut values = Vec::with_capacity(total_len);
         for frame in frames {
             values.extend_from_slice(
                 frame
-                    .column(&name)
+                    .column(name)
                     .expect("shared concat(axis=0, join='inner') column must exist")
                     .values(),
             );
         }
-        columns.insert(name, Column::from_values(values)?);
+        columns.insert(name.clone(), Column::from_values(values)?);
     }
 
-    DataFrame::new(index, columns)
+    DataFrame::new_with_column_order(index, columns, shared_columns)
 }
 
 /// Column-wise DataFrame concat with deterministic outer index alignment.
@@ -845,10 +855,14 @@ fn concat_dataframes_axis1(
     };
 
     let mut columns = BTreeMap::new();
+    let mut output_column_order = Vec::new();
     for frame in frames {
         let positions = frame.index().get_indexer(&target_index);
 
-        for (name, column) in frame.columns() {
+        for name in frame.column_names() {
+            let column = frame
+                .column(name)
+                .expect("frame column listed in order must exist");
             if columns.contains_key(name) {
                 return Err(FrameError::CompatibilityRejected(format!(
                     "duplicate column '{name}' in concat(axis=1) output"
@@ -864,25 +878,76 @@ fn concat_dataframes_axis1(
                 .collect::<Vec<_>>();
 
             columns.insert(name.clone(), Column::from_values(values)?);
+            output_column_order.push(name.clone());
         }
     }
 
-    DataFrame::new(target_index, columns)
+    DataFrame::new_with_column_order(target_index, columns, output_column_order)
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DataFrame {
     index: Index,
     columns: BTreeMap<String, Column>,
+    #[serde(skip)]
+    column_order: Vec<String>,
 }
 
 impl DataFrame {
+    fn validate_column_lengths(
+        index: &Index,
+        columns: &BTreeMap<String, Column>,
+    ) -> Result<(), FrameError> {
+        for column in columns.values() {
+            if column.len() != index.len() {
+                return Err(FrameError::LengthMismatch {
+                    index_len: index.len(),
+                    column_len: column.len(),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    fn normalize_column_order(
+        columns: &BTreeMap<String, Column>,
+        column_order: Vec<String>,
+    ) -> Result<Vec<String>, FrameError> {
+        if column_order.is_empty() {
+            return Ok(columns.keys().cloned().collect());
+        }
+
+        let mut normalized = Vec::with_capacity(columns.len());
+        let mut seen = BTreeSet::new();
+        for name in column_order {
+            if !columns.contains_key(&name) {
+                return Err(FrameError::CompatibilityRejected(format!(
+                    "column '{name}' not found in data"
+                )));
+            }
+            if !seen.insert(name.clone()) {
+                return Err(FrameError::CompatibilityRejected(format!(
+                    "duplicate column selector: '{name}'"
+                )));
+            }
+            normalized.push(name);
+        }
+
+        for name in columns.keys() {
+            if seen.insert(name.clone()) {
+                normalized.push(name.clone());
+            }
+        }
+
+        Ok(normalized)
+    }
+
     fn resolve_column_selector(
         &self,
         column_selector: Option<&[String]>,
     ) -> Result<Vec<String>, FrameError> {
         let Some(requested_columns) = column_selector else {
-            return Ok(self.columns.keys().cloned().collect());
+            return Ok(self.column_order.clone());
         };
 
         let mut selected = Vec::with_capacity(requested_columns.len());
@@ -905,16 +970,27 @@ impl DataFrame {
     }
 
     pub fn new(index: Index, columns: BTreeMap<String, Column>) -> Result<Self, FrameError> {
-        for column in columns.values() {
-            if column.len() != index.len() {
-                return Err(FrameError::LengthMismatch {
-                    index_len: index.len(),
-                    column_len: column.len(),
-                });
-            }
-        }
+        Self::validate_column_lengths(&index, &columns)?;
+        let column_order = columns.keys().cloned().collect();
+        Ok(Self {
+            index,
+            columns,
+            column_order,
+        })
+    }
 
-        Ok(Self { index, columns })
+    pub fn new_with_column_order(
+        index: Index,
+        columns: BTreeMap<String, Column>,
+        column_order: Vec<String>,
+    ) -> Result<Self, FrameError> {
+        Self::validate_column_lengths(&index, &columns)?;
+        let column_order = Self::normalize_column_order(&columns, column_order)?;
+        Ok(Self {
+            index,
+            columns,
+            column_order,
+        })
     }
 
     /// AG-05: Pre-compute N-way union index across all series first, then
@@ -935,6 +1011,7 @@ impl DataFrame {
 
         // Phase 2: Reindex each series column exactly once against the final union index.
         let mut columns = BTreeMap::new();
+        let mut column_order = Vec::new();
         for series in series_list {
             let plan = align_union(&union_index, &series.index);
             // The right_positions map from the union to this series's positions.
@@ -942,10 +1019,11 @@ impl DataFrame {
             // this plan equals our pre-computed union. We use right_positions to
             // locate each series's values within the union.
             let aligned_column = series.column.reindex_by_positions(&plan.right_positions)?;
+            column_order.push(series.name.clone());
             columns.insert(series.name, aligned_column);
         }
 
-        Self::new(union_index, columns)
+        Self::new_with_column_order(union_index, columns, column_order)
     }
 
     /// Construct a DataFrame from a dict of column vectors.
@@ -954,7 +1032,7 @@ impl DataFrame {
     /// All vectors must have the same length. Index is auto-generated
     /// as 0..n (RangeIndex-style).
     ///
-    /// `column_order` controls insertion order since BTreeMap sorts by key.
+    /// `column_order` controls observable column label order.
     pub fn from_dict(
         column_order: &[&str],
         data: Vec<(&str, Vec<Scalar>)>,
@@ -967,6 +1045,7 @@ impl DataFrame {
         let index = Index::new((0..n as i64).map(IndexLabel::from).collect());
 
         let mut columns = BTreeMap::new();
+        let mut input_order = Vec::new();
         for (name, values) in data {
             if values.len() != n {
                 return Err(FrameError::LengthMismatch {
@@ -974,22 +1053,37 @@ impl DataFrame {
                     column_len: values.len(),
                 });
             }
+            input_order.push(name.to_owned());
             columns.insert(name.to_owned(), Column::from_values(values)?);
         }
 
-        // If column_order is provided, verify all requested columns exist.
-        // BTreeMap handles ordering by key, but column_order documents intent.
-        if !column_order.is_empty() {
-            for &col in column_order {
-                if !columns.contains_key(col) {
+        let output_order = if column_order.is_empty() {
+            input_order
+        } else {
+            let mut explicit = Vec::with_capacity(columns.len());
+            let mut seen = BTreeSet::new();
+            for &name in column_order {
+                if !columns.contains_key(name) {
                     return Err(FrameError::CompatibilityRejected(format!(
-                        "column '{col}' not found in data"
+                        "column '{name}' not found in data"
                     )));
                 }
+                if !seen.insert(name.to_owned()) {
+                    return Err(FrameError::CompatibilityRejected(format!(
+                        "duplicate column selector: '{name}'"
+                    )));
+                }
+                explicit.push(name.to_owned());
             }
-        }
+            for name in input_order {
+                if seen.insert(name.clone()) {
+                    explicit.push(name);
+                }
+            }
+            explicit
+        };
 
-        Self::new(index, columns)
+        Self::new_with_column_order(index, columns, output_order)
     }
 
     /// Construct a DataFrame from a dict of column vectors with an explicit index.
@@ -1003,6 +1097,7 @@ impl DataFrame {
         let index = Index::new(index_labels);
 
         let mut columns = BTreeMap::new();
+        let mut input_order = Vec::new();
         for (name, values) in data {
             if values.len() != n {
                 return Err(FrameError::LengthMismatch {
@@ -1010,10 +1105,11 @@ impl DataFrame {
                     column_len: values.len(),
                 });
             }
+            input_order.push(name.to_owned());
             columns.insert(name.to_owned(), Column::from_values(values)?);
         }
 
-        Self::new(index, columns)
+        Self::new_with_column_order(index, columns, input_order)
     }
 
     /// Return a new DataFrame with only the specified columns, in order.
@@ -1033,7 +1129,8 @@ impl DataFrame {
                 }
             }
         }
-        Self::new(self.index.clone(), columns)
+        let column_order = names.iter().map(|name| (*name).to_owned()).collect();
+        Self::new_with_column_order(self.index.clone(), columns, column_order)
     }
 
     /// Return the number of rows.
@@ -1064,12 +1161,12 @@ impl DataFrame {
         &self.columns
     }
 
-    /// Return the column names as a sorted vector.
+    /// Return the column names in observable DataFrame order.
     ///
     /// Matches `pd.DataFrame.columns` (returns the column labels).
     #[must_use]
     pub fn column_names(&self) -> Vec<&String> {
-        self.columns.keys().collect()
+        self.column_order.iter().collect()
     }
 
     #[must_use]
@@ -1113,7 +1210,11 @@ impl DataFrame {
         }
 
         let mut new_columns = BTreeMap::new();
-        for (name, col) in &self.columns {
+        for name in &self.column_order {
+            let col = self
+                .columns
+                .get(name)
+                .expect("column name listed in order must exist");
             let aligned = col.reindex_by_positions(&plan.left_positions)?;
             let filtered_values: Vec<Scalar> = aligned
                 .values()
@@ -1124,7 +1225,11 @@ impl DataFrame {
             new_columns.insert(name.clone(), Column::from_values(filtered_values)?);
         }
 
-        Self::new(Index::new(new_labels), new_columns)
+        Self::new_with_column_order(
+            Index::new(new_labels),
+            new_columns,
+            self.column_order.clone(),
+        )
     }
 
     /// Return the first `n` rows.
@@ -1135,11 +1240,15 @@ impl DataFrame {
         let take = normalize_head_take(n, self.len());
         let labels = self.index.labels()[..take].to_vec();
         let mut columns = BTreeMap::new();
-        for (name, col) in &self.columns {
+        for name in &self.column_order {
+            let col = self
+                .columns
+                .get(name)
+                .expect("column name listed in order must exist");
             let values = col.values()[..take].to_vec();
             columns.insert(name.clone(), Column::from_values(values)?);
         }
-        Self::new(Index::new(labels), columns)
+        Self::new_with_column_order(Index::new(labels), columns, self.column_order.clone())
     }
 
     /// Return the last `n` rows.
@@ -1150,11 +1259,15 @@ impl DataFrame {
         let (start, _) = normalize_tail_window(n, self.len());
         let labels = self.index.labels()[start..].to_vec();
         let mut columns = BTreeMap::new();
-        for (name, col) in &self.columns {
+        for name in &self.column_order {
+            let col = self
+                .columns
+                .get(name)
+                .expect("column name listed in order must exist");
             let values = col.values()[start..].to_vec();
             columns.insert(name.clone(), Column::from_values(values)?);
         }
-        Self::new(Index::new(labels), columns)
+        Self::new_with_column_order(Index::new(labels), columns, self.column_order.clone())
     }
 
     /// Label-based row selection for list-like indexers.
@@ -1197,18 +1310,18 @@ impl DataFrame {
 
         let selected_columns = self.resolve_column_selector(column_selector)?;
         let mut columns = BTreeMap::new();
-        for name in selected_columns {
-            let column = self.columns.get(&name).ok_or_else(|| {
+        for name in &selected_columns {
+            let column = self.columns.get(name).ok_or_else(|| {
                 FrameError::CompatibilityRejected(format!("column '{name}' not found"))
             })?;
             let mut values = Vec::with_capacity(positions.len());
             for &position in &positions {
                 values.push(column.values()[position].clone());
             }
-            columns.insert(name, Column::from_values(values)?);
+            columns.insert(name.clone(), Column::from_values(values)?);
         }
 
-        Self::new(Index::new(out_labels), columns)
+        Self::new_with_column_order(Index::new(out_labels), columns, selected_columns)
     }
 
     /// Position-based row selection for list-like indexers.
@@ -1243,18 +1356,18 @@ impl DataFrame {
 
         let selected_columns = self.resolve_column_selector(column_selector)?;
         let mut columns = BTreeMap::new();
-        for name in selected_columns {
-            let column = self.columns.get(&name).ok_or_else(|| {
+        for name in &selected_columns {
+            let column = self.columns.get(name).ok_or_else(|| {
                 FrameError::CompatibilityRejected(format!("column '{name}' not found"))
             })?;
             let mut values = Vec::with_capacity(normalized_positions.len());
             for &position in &normalized_positions {
                 values.push(column.values()[position].clone());
             }
-            columns.insert(name, Column::from_values(values)?);
+            columns.insert(name.clone(), Column::from_values(values)?);
         }
 
-        Self::new(Index::new(out_labels), columns)
+        Self::new_with_column_order(Index::new(out_labels), columns, selected_columns)
     }
 
     /// Add or replace a column.
@@ -1267,9 +1380,14 @@ impl DataFrame {
                 column_len: column.len(),
             });
         }
+        let name = name.into();
         let mut columns = self.columns.clone();
-        columns.insert(name.into(), column);
-        Self::new(self.index.clone(), columns)
+        columns.insert(name.clone(), column);
+        let mut column_order = self.column_order.clone();
+        if !column_order.contains(&name) {
+            column_order.push(name);
+        }
+        Self::new_with_column_order(self.index.clone(), columns, column_order)
     }
 
     /// Remove a column by name, returning the modified DataFrame.
@@ -1283,7 +1401,13 @@ impl DataFrame {
         }
         let mut columns = self.columns.clone();
         columns.remove(name);
-        Self::new(self.index.clone(), columns)
+        let column_order = self
+            .column_order
+            .iter()
+            .filter(|column| column.as_str() != name)
+            .cloned()
+            .collect();
+        Self::new_with_column_order(self.index.clone(), columns, column_order)
     }
 
     /// Rename columns using a mapping.
@@ -1292,12 +1416,18 @@ impl DataFrame {
     pub fn rename_columns(&self, mapping: &[(&str, &str)]) -> Result<Self, FrameError> {
         let rename_map: BTreeMap<&str, &str> = mapping.iter().copied().collect();
         let mut columns = BTreeMap::new();
-        for (name, col) in &self.columns {
+        let mut column_order = Vec::with_capacity(self.column_order.len());
+        for name in &self.column_order {
+            let col = self
+                .columns
+                .get(name)
+                .expect("column name listed in order must exist");
             let name_str = name.as_str();
             let new_name = rename_map.get(name_str).unwrap_or(&name_str);
+            column_order.push((*new_name).to_owned());
             columns.insert((*new_name).to_owned(), col.clone());
         }
-        Self::new(self.index.clone(), columns)
+        Self::new_with_column_order(self.index.clone(), columns, column_order)
     }
 }
 
@@ -1923,6 +2053,26 @@ mod tests {
     }
 
     #[test]
+    fn dataframe_from_dict_preserves_explicit_column_order() {
+        let df = DataFrame::from_dict(
+            &["b", "a", "c"],
+            vec![
+                ("a", vec![Scalar::Int64(1)]),
+                ("b", vec![Scalar::Int64(2)]),
+                ("c", vec![Scalar::Int64(3)]),
+            ],
+        )
+        .unwrap();
+
+        let names = df
+            .column_names()
+            .into_iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        assert_eq!(names, vec!["b", "a", "c"]);
+    }
+
+    #[test]
     fn dataframe_select_columns_missing_rejects() {
         let df = DataFrame::from_dict(&["a"], vec![("a", vec![Scalar::Int64(1)])]).unwrap();
 
@@ -2016,12 +2166,43 @@ mod tests {
     }
 
     #[test]
-    fn concat_dataframes_mismatched_columns_rejects() {
-        let df1 = DataFrame::from_dict(&["a"], vec![("a", vec![Scalar::Int64(1)])]).unwrap();
-        let df2 = DataFrame::from_dict(&["b"], vec![("b", vec![Scalar::Int64(2)])]).unwrap();
+    fn concat_dataframes_mismatched_columns_outer_unions_and_null_fills() {
+        let df1 = DataFrame::from_dict(
+            &["b", "a"],
+            vec![
+                ("b", vec![Scalar::Int64(10)]),
+                ("a", vec![Scalar::Int64(1)]),
+            ],
+        )
+        .unwrap();
+        let df2 = DataFrame::from_dict(
+            &["c", "a"],
+            vec![
+                ("c", vec![Scalar::Int64(20)]),
+                ("a", vec![Scalar::Int64(2)]),
+            ],
+        )
+        .unwrap();
 
-        let err = concat_dataframes(&[&df1, &df2]).expect_err("should reject");
-        assert!(matches!(err, FrameError::CompatibilityRejected(_)));
+        let out = concat_dataframes(&[&df1, &df2]).unwrap();
+        let column_names = out
+            .column_names()
+            .into_iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        assert_eq!(column_names, vec!["b", "a", "c"]);
+        assert_eq!(
+            out.column("a").unwrap().values(),
+            &[Scalar::Int64(1), Scalar::Int64(2)]
+        );
+        assert_eq!(
+            out.column("b").unwrap().values(),
+            &[Scalar::Int64(10), Scalar::Null(NullKind::Null)]
+        );
+        assert_eq!(
+            out.column("c").unwrap().values(),
+            &[Scalar::Null(NullKind::Null), Scalar::Int64(20)]
+        );
     }
 
     #[test]

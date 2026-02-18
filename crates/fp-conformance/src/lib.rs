@@ -330,12 +330,16 @@ pub struct FixtureExpectedSeries {
 pub struct FixtureDataFrame {
     pub index: Vec<IndexLabel>,
     pub columns: BTreeMap<String, Vec<Scalar>>,
+    #[serde(default)]
+    pub column_order: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FixtureExpectedDataFrame {
     pub index: Vec<IndexLabel>,
     pub columns: BTreeMap<String, Vec<Scalar>>,
+    #[serde(default)]
+    pub column_order: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -4740,11 +4744,30 @@ fn build_series(series: &FixtureSeries) -> Result<Series, String> {
 }
 
 fn build_dataframe(frame: &FixtureDataFrame) -> Result<DataFrame, String> {
-    let columns = frame
-        .columns
-        .iter()
-        .map(|(name, values)| (name.as_str(), values.clone()))
-        .collect::<Vec<_>>();
+    let mut columns = Vec::new();
+    let mut seen = BTreeSet::new();
+
+    if let Some(column_order) = frame.column_order.as_ref() {
+        for name in column_order {
+            let values = frame
+                .columns
+                .get(name)
+                .ok_or_else(|| format!("frame column_order references missing column '{name}'"))?;
+            if !seen.insert(name.clone()) {
+                return Err(format!(
+                    "frame column_order contains duplicate column '{name}'"
+                ));
+            }
+            columns.push((name.as_str(), values.clone()));
+        }
+    }
+
+    for (name, values) in &frame.columns {
+        if seen.insert(name.clone()) {
+            columns.push((name.as_str(), values.clone()));
+        }
+    }
+
     DataFrame::from_dict_with_index(columns, frame.index.clone()).map_err(|err| err.to_string())
 }
 
@@ -4795,8 +4818,15 @@ fn compare_dataframe_expected(
         ));
     }
 
-    let actual_names = actual.columns().keys().cloned().collect::<Vec<_>>();
-    let expected_names = expected.columns.keys().cloned().collect::<Vec<_>>();
+    let actual_names = actual
+        .column_names()
+        .into_iter()
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>();
+    let expected_names = expected
+        .column_order
+        .clone()
+        .unwrap_or_else(|| expected.columns.keys().cloned().collect::<Vec<_>>());
     if actual_names != expected_names {
         return Err(format!(
             "dataframe column mismatch: actual={actual_names:?}, expected={expected_names:?}"
@@ -7928,6 +7958,32 @@ mod tests {
         assert!(
             report.fixture_count >= 10,
             "expected FP-P2D-030 dataframe concat axis=0 inner-join fixtures"
+        );
+        assert!(report.is_green(), "expected report green: {report:?}");
+    }
+
+    #[test]
+    fn packet_filter_runs_dataframe_concat_axis0_outer_join_packet() {
+        let cfg = HarnessConfig::default_paths();
+        let report =
+            run_packet_by_id(&cfg, "FP-P2D-031", OracleMode::FixtureExpected).expect("report");
+        assert_eq!(report.packet_id.as_deref(), Some("FP-P2D-031"));
+        assert!(
+            report.fixture_count >= 10,
+            "expected FP-P2D-031 dataframe concat axis=0 outer-join fixtures"
+        );
+        assert!(report.is_green(), "expected report green: {report:?}");
+    }
+
+    #[test]
+    fn packet_filter_runs_dataframe_concat_axis0_outer_column_order_packet() {
+        let cfg = HarnessConfig::default_paths();
+        let report =
+            run_packet_by_id(&cfg, "FP-P2D-032", OracleMode::FixtureExpected).expect("report");
+        assert_eq!(report.packet_id.as_deref(), Some("FP-P2D-032"));
+        assert!(
+            report.fixture_count >= 10,
+            "expected FP-P2D-032 dataframe concat axis=0 outer column-order fixtures"
         );
         assert!(report.is_green(), "expected report green: {report:?}");
     }

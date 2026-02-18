@@ -879,6 +879,7 @@ def op_series_head(pd, payload: dict[str, Any]) -> dict[str, Any]:
 def dataframe_from_json(pd, payload: dict[str, Any]):
     index_raw = payload.get("index")
     columns_raw = payload.get("columns")
+    column_order_raw = payload.get("column_order")
     if not isinstance(index_raw, list):
         raise OracleError("frame payload requires index list")
     if not isinstance(columns_raw, dict):
@@ -896,7 +897,32 @@ def dataframe_from_json(pd, payload: dict[str, Any]):
             )
         columns[str(name)] = parsed
 
-    return pd.DataFrame(columns, index=index)
+    input_order = [str(name) for name in columns.keys()]
+    if column_order_raw is None:
+        column_order = input_order
+    else:
+        if not isinstance(column_order_raw, list):
+            raise OracleError("frame payload column_order must be a list")
+        column_order = []
+        seen: set[str] = set()
+        for raw in column_order_raw:
+            name = str(raw)
+            if name not in columns:
+                raise OracleError(
+                    f"frame payload column_order references unknown column {name!r}"
+                )
+            if name in seen:
+                raise OracleError(
+                    f"frame payload column_order contains duplicate column {name!r}"
+                )
+            seen.add(name)
+            column_order.append(name)
+        for name in input_order:
+            if name not in seen:
+                column_order.append(name)
+
+    frame = pd.DataFrame(columns, index=index)
+    return frame.reindex(columns=column_order)
 
 
 def dataframe_to_json(frame) -> dict[str, Any]:
@@ -1074,10 +1100,6 @@ def op_dataframe_concat(pd, payload: dict[str, Any]) -> dict[str, Any]:
         )
 
     if axis == 0:
-        if join == "outer" and sorted(left.columns.tolist()) != sorted(right.columns.tolist()):
-            raise OracleError(
-                "dataframe_concat column mismatch: right frame columns do not match left frame"
-            )
         out = pd.concat([left, right], axis=0, join=join, sort=False)
     else:
         overlapping = sorted(set(left.columns.tolist()) & set(right.columns.tolist()))
@@ -1087,7 +1109,9 @@ def op_dataframe_concat(pd, payload: dict[str, Any]) -> dict[str, Any]:
                 f"dataframe_concat axis=1 duplicate columns unsupported: {joined}"
             )
         out = pd.concat([left, right], axis=1, join=join, sort=False)
-    return {"expected_frame": dataframe_to_json(out)}
+    expected_frame = dataframe_to_json(out)
+    expected_frame["column_order"] = [str(name) for name in out.columns.tolist()]
+    return {"expected_frame": expected_frame}
 
 
 def dispatch(pd, payload: dict[str, Any]) -> dict[str, Any]:
