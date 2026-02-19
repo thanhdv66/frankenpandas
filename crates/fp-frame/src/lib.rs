@@ -1481,6 +1481,51 @@ impl DataFrame {
         )
     }
 
+    /// Fill missing values in each column with `fill_value`.
+    ///
+    /// Matches `df.fillna(value)` for scalar `value`.
+    pub fn fillna(&self, fill_value: &Scalar) -> Result<Self, FrameError> {
+        let mut columns = BTreeMap::new();
+        for name in &self.column_order {
+            let column = self
+                .columns
+                .get(name)
+                .expect("column name listed in order must exist");
+            columns.insert(name.clone(), column.fillna(fill_value)?);
+        }
+
+        Self::new_with_column_order(self.index.clone(), columns, self.column_order.clone())
+    }
+
+    /// Drop rows containing missing values in any selected column.
+    ///
+    /// Matches default `df.dropna()` row-wise behavior (`axis=0`, `how='any'`).
+    pub fn dropna(&self) -> Result<Self, FrameError> {
+        if self.is_empty() || self.column_order.is_empty() {
+            return Ok(self.clone());
+        }
+
+        let mut keep = vec![true; self.len()];
+        for name in &self.column_order {
+            let column = self
+                .columns
+                .get(name)
+                .expect("column name listed in order must exist");
+            for (position, value) in column.values().iter().enumerate() {
+                if value.is_missing() {
+                    keep[position] = false;
+                }
+            }
+        }
+
+        let mask = Series::from_values(
+            "__dropna_mask__",
+            self.index.labels().to_vec(),
+            keep.into_iter().map(Scalar::Bool).collect::<Vec<_>>(),
+        )?;
+        self.filter_rows(&mask)
+    }
+
     /// Return the first `n` rows.
     ///
     /// Matches `df.head(n)`. If `n` is negative, this returns all rows except
@@ -3646,7 +3691,7 @@ mod tests {
         );
     }
 
-    // ---- DataFrame filter_rows, head, tail, with_column, drop_column, rename tests ----
+    // ---- DataFrame filter_rows/fillna/dropna/head/tail/column-mutation tests ----
 
     #[test]
     fn dataframe_filter_rows_basic() {
@@ -3712,6 +3757,74 @@ mod tests {
         assert!(
             matches!(err, FrameError::CompatibilityRejected(msg) if msg.contains("boolean mask required for filter_rows"))
         );
+    }
+
+    #[test]
+    fn dataframe_fillna_replaces_nulls() {
+        let df = DataFrame::from_dict(
+            &["a", "b"],
+            vec![
+                (
+                    "a",
+                    vec![
+                        Scalar::Int64(1),
+                        Scalar::Null(NullKind::Null),
+                        Scalar::Int64(3),
+                    ],
+                ),
+                (
+                    "b",
+                    vec![
+                        Scalar::Null(NullKind::Null),
+                        Scalar::Int64(20),
+                        Scalar::Int64(30),
+                    ],
+                ),
+            ],
+        )
+        .unwrap();
+
+        let filled = df.fillna(&Scalar::Int64(0)).unwrap();
+        assert_eq!(
+            filled.column("a").unwrap().values(),
+            &[Scalar::Int64(1), Scalar::Int64(0), Scalar::Int64(3)]
+        );
+        assert_eq!(
+            filled.column("b").unwrap().values(),
+            &[Scalar::Int64(0), Scalar::Int64(20), Scalar::Int64(30)]
+        );
+    }
+
+    #[test]
+    fn dataframe_dropna_drops_rows_with_any_null() {
+        let df = DataFrame::from_dict(
+            &["a", "b"],
+            vec![
+                (
+                    "a",
+                    vec![
+                        Scalar::Int64(1),
+                        Scalar::Null(NullKind::Null),
+                        Scalar::Int64(3),
+                    ],
+                ),
+                (
+                    "b",
+                    vec![
+                        Scalar::Null(NullKind::Null),
+                        Scalar::Int64(20),
+                        Scalar::Int64(30),
+                    ],
+                ),
+            ],
+        )
+        .unwrap();
+
+        let dropped = df.dropna().unwrap();
+        assert_eq!(dropped.len(), 1);
+        assert_eq!(dropped.index().labels(), &[IndexLabel::from(2_i64)]);
+        assert_eq!(dropped.column("a").unwrap().values(), &[Scalar::Int64(3)]);
+        assert_eq!(dropped.column("b").unwrap().values(), &[Scalar::Int64(30)]);
     }
 
     #[test]
