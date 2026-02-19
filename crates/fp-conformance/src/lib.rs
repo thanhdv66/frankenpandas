@@ -3035,19 +3035,39 @@ fn run_fixture_operation(
         FixtureOperation::SeriesJoin => {
             let left = require_left_series(fixture)?;
             let right = require_right_series(fixture)?;
-            let join_type = require_join_type(fixture)?;
-            let joined = join_series(
-                &build_series(left).map_err(|err| format!("left series build failed: {err}"))?,
-                &build_series(right).map_err(|err| format!("right series build failed: {err}"))?,
-                join_type.into_join_type(),
-            )
-            .map_err(|err| err.to_string())?;
+            let joined = (|| -> Result<fp_join::JoinedSeries, String> {
+                let left_series =
+                    build_series(left).map_err(|err| format!("left series build failed: {err}"))?;
+                let right_series = build_series(right)
+                    .map_err(|err| format!("right series build failed: {err}"))?;
+                let join_type = require_series_join_type(fixture)?;
+                join_series(&left_series, &right_series, join_type).map_err(|err| err.to_string())
+            })();
 
-            let expected = match expected {
-                ResolvedExpected::Join(join) => join,
-                _ => return Err("expected_join is required for series_join".to_owned()),
-            };
-            compare_join_expected(&joined, &expected)
+            match expected {
+                ResolvedExpected::Join(expected_join) => {
+                    compare_join_expected(&joined?, &expected_join)
+                }
+                ResolvedExpected::ErrorContains(substr) => match joined {
+                    Err(message) => {
+                        if message.contains(&substr) {
+                            Ok(())
+                        } else {
+                            Err(format!(
+                                "expected series_join error containing '{substr}', got '{message}'"
+                            ))
+                        }
+                    }
+                    Ok(_) => Err(format!(
+                        "expected series_join to fail with error containing '{substr}'"
+                    )),
+                },
+                ResolvedExpected::ErrorAny => match joined {
+                    Err(_) => Ok(()),
+                    Ok(_) => Err("expected series_join to fail".to_owned()),
+                },
+                _ => Err("expected_join is required for series_join".to_owned()),
+            }
         }
         FixtureOperation::SeriesConstructor => {
             let left = require_left_series(fixture)?;
@@ -4129,6 +4149,16 @@ fn require_join_type(fixture: &PacketFixture) -> Result<FixtureJoinType, String>
     fixture
         .join_type
         .ok_or_else(|| "missing join_type for join fixture".to_owned())
+}
+
+fn require_series_join_type(fixture: &PacketFixture) -> Result<JoinType, String> {
+    let join_type = require_join_type(fixture)?;
+    if matches!(join_type, FixtureJoinType::Cross) {
+        return Err(
+            "series_join requires join_type=inner|left|right|outer, got 'cross'".to_owned(),
+        );
+    }
+    Ok(join_type.into_join_type())
 }
 
 fn resolve_merge_on_keys(
@@ -5326,18 +5356,44 @@ fn execute_and_compare_differential(
         FixtureOperation::SeriesJoin => {
             let left = require_left_series(fixture)?;
             let right = require_right_series(fixture)?;
-            let join_type = require_join_type(fixture)?;
-            let joined = join_series(
-                &build_series(left).map_err(|err| format!("left build: {err}"))?,
-                &build_series(right).map_err(|err| format!("right build: {err}"))?,
-                join_type.into_join_type(),
-            )
-            .map_err(|err| err.to_string())?;
-            let expected = match expected {
-                ResolvedExpected::Join(j) => j,
-                _ => return Err("expected_join required for series_join".to_owned()),
-            };
-            Ok(diff_join(&joined, &expected))
+            let joined = (|| -> Result<fp_join::JoinedSeries, String> {
+                let left_series = build_series(left).map_err(|err| format!("left build: {err}"))?;
+                let right_series =
+                    build_series(right).map_err(|err| format!("right build: {err}"))?;
+                let join_type = require_series_join_type(fixture)?;
+                join_series(&left_series, &right_series, join_type).map_err(|err| err.to_string())
+            })();
+            match expected {
+                ResolvedExpected::Join(expected_join) => Ok(diff_join(&joined?, &expected_join)),
+                ResolvedExpected::ErrorContains(substr) => Ok(match joined {
+                    Err(message) if message.contains(&substr) => Vec::new(),
+                    Err(message) => vec![make_drift_record(
+                        ComparisonCategory::Value,
+                        DriftLevel::Critical,
+                        "series_join.error",
+                        format!(
+                            "expected series_join error containing '{substr}', got '{}'",
+                            message
+                        ),
+                    )],
+                    Ok(_) => vec![make_drift_record(
+                        ComparisonCategory::Value,
+                        DriftLevel::Critical,
+                        "series_join.error",
+                        format!("expected series_join to fail with error containing '{substr}'"),
+                    )],
+                }),
+                ResolvedExpected::ErrorAny => Ok(match joined {
+                    Err(_) => Vec::new(),
+                    Ok(_) => vec![make_drift_record(
+                        ComparisonCategory::Value,
+                        DriftLevel::Critical,
+                        "series_join.error",
+                        "expected series_join to fail".to_owned(),
+                    )],
+                }),
+                _ => Err("expected_join required for series_join".to_owned()),
+            }
         }
         FixtureOperation::SeriesConstructor => {
             let left = require_left_series(fixture)?;
