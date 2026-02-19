@@ -72,6 +72,15 @@ impl EvalContext {
         self.series.insert(series.name().to_owned(), series);
     }
 
+    pub fn from_dataframe(frame: &fp_frame::DataFrame) -> Result<Self, ExprError> {
+        let mut context = Self::new();
+        for (name, column) in frame.columns() {
+            let series = Series::new(name.clone(), frame.index().clone(), column.clone())?;
+            context.insert_series(series);
+        }
+        Ok(context)
+    }
+
     #[must_use]
     pub fn get_series(&self, name: &str) -> Option<&Series> {
         self.series.get(name)
@@ -142,6 +151,16 @@ pub fn evaluate(
         }
         Expr::Literal { .. } => Err(ExprError::UnanchoredLiteral),
     }
+}
+
+pub fn evaluate_on_dataframe(
+    expr: &Expr,
+    frame: &fp_frame::DataFrame,
+    policy: &RuntimePolicy,
+    ledger: &mut EvidenceLedger,
+) -> Result<Series, ExprError> {
+    let context = EvalContext::from_dataframe(frame)?;
+    evaluate(expr, &context, policy, ledger)
 }
 
 fn apply_series_comparison(
@@ -732,6 +751,75 @@ mod tests {
                 Scalar::Null(fp_types::NullKind::Null)
             ]
         );
+    }
+
+    #[test]
+    fn eval_context_from_dataframe_builds_series_bindings() {
+        let frame = fp_frame::DataFrame::from_dict(
+            &["a", "b"],
+            vec![
+                ("a", vec![Scalar::Int64(1), Scalar::Int64(2)]),
+                ("b", vec![Scalar::Int64(10), Scalar::Int64(20)]),
+            ],
+        )
+        .expect("frame");
+
+        let context = EvalContext::from_dataframe(&frame).expect("context");
+        let a = context.get_series("a").expect("a series present");
+        let b = context.get_series("b").expect("b series present");
+
+        assert_eq!(a.values(), &[Scalar::Int64(1), Scalar::Int64(2)]);
+        assert_eq!(b.values(), &[Scalar::Int64(10), Scalar::Int64(20)]);
+        assert_eq!(a.index().labels(), frame.index().labels());
+        assert_eq!(b.index().labels(), frame.index().labels());
+    }
+
+    #[test]
+    fn evaluate_on_dataframe_matches_manual_context_eval() {
+        let frame = fp_frame::DataFrame::from_dict(
+            &["a", "b"],
+            vec![
+                ("a", vec![Scalar::Int64(3), Scalar::Int64(4)]),
+                ("b", vec![Scalar::Int64(30), Scalar::Int64(40)]),
+            ],
+        )
+        .expect("frame");
+
+        let expr = Expr::Add {
+            left: Box::new(Expr::Series {
+                name: SeriesRef("a".to_owned()),
+            }),
+            right: Box::new(Expr::Series {
+                name: SeriesRef("b".to_owned()),
+            }),
+        };
+        let policy = RuntimePolicy::hardened(Some(10_000));
+        let mut ledger = EvidenceLedger::new();
+        let via_frame =
+            super::evaluate_on_dataframe(&expr, &frame, &policy, &mut ledger).expect("frame eval");
+
+        let mut manual = EvalContext::new();
+        manual.insert_series(
+            Series::new(
+                "a",
+                frame.index().clone(),
+                frame.column("a").expect("a column").clone(),
+            )
+            .expect("a series"),
+        );
+        manual.insert_series(
+            Series::new(
+                "b",
+                frame.index().clone(),
+                frame.column("b").expect("b column").clone(),
+            )
+            .expect("b series"),
+        );
+        let mut ledger = EvidenceLedger::new();
+        let manual_out = evaluate(&expr, &manual, &policy, &mut ledger).expect("manual eval");
+
+        assert_eq!(via_frame.values(), manual_out.values());
+        assert_eq!(via_frame.index().labels(), manual_out.index().labels());
     }
 
     // === AG-15: Incremental View Maintenance Tests ===
