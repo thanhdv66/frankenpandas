@@ -52,6 +52,11 @@ impl Default for JoinExecutionOptions {
     }
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MergeExecutionOptions {
+    pub indicator_name: Option<String>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct JoinExecutionTrace {
     used_arena: bool,
@@ -426,6 +431,56 @@ fn reorder_vec_by_index<T: Clone>(values: &mut Vec<T>, order: &[usize]) {
     }
 }
 
+fn resolve_merge_indicator_name(indicator_name: Option<&str>) -> Result<Option<String>, JoinError> {
+    let Some(name) = indicator_name else {
+        return Ok(None);
+    };
+    if name.trim().is_empty() {
+        return Err(JoinError::Frame(FrameError::CompatibilityRejected(
+            "merge indicator column name must be non-empty".to_owned(),
+        )));
+    }
+    Ok(Some(name.to_owned()))
+}
+
+fn build_merge_indicator_column(
+    left_positions: &[Option<usize>],
+    right_positions: &[Option<usize>],
+) -> Result<Column, JoinError> {
+    let values = left_positions
+        .iter()
+        .zip(right_positions.iter())
+        .map(|(left_pos, right_pos)| match (left_pos, right_pos) {
+            (Some(_), Some(_)) => fp_types::Scalar::Utf8("both".to_owned()),
+            (Some(_), None) => fp_types::Scalar::Utf8("left_only".to_owned()),
+            (None, Some(_)) => fp_types::Scalar::Utf8("right_only".to_owned()),
+            (None, None) => fp_types::Scalar::Null(fp_types::NullKind::Null),
+        })
+        .collect::<Vec<_>>();
+    Column::from_values(values).map_err(JoinError::from)
+}
+
+fn ensure_indicator_name_available(
+    indicator_name: &str,
+    left_col_names: &HashSet<&String>,
+    right_col_names: &HashSet<&String>,
+    output_columns: &std::collections::BTreeMap<String, Column>,
+) -> Result<(), JoinError> {
+    if left_col_names
+        .iter()
+        .any(|name| name.as_str() == indicator_name)
+        || right_col_names
+            .iter()
+            .any(|name| name.as_str() == indicator_name)
+        || output_columns.contains_key(indicator_name)
+    {
+        return Err(JoinError::Frame(FrameError::CompatibilityRejected(
+            format!("merge indicator column '{indicator_name}' conflicts with an existing column"),
+        )));
+    }
+    Ok(())
+}
+
 /// Merge two DataFrames on one or more key columns.
 ///
 /// Matches `pd.merge(left, right, left_on=left_keys, right_on=right_keys, how=join_type)`.
@@ -440,8 +495,29 @@ pub fn merge_dataframes_on_with(
     right_on: &[&str],
     join_type: JoinType,
 ) -> Result<MergedDataFrame, JoinError> {
+    merge_dataframes_on_with_options(
+        left,
+        right,
+        left_on,
+        right_on,
+        join_type,
+        MergeExecutionOptions::default(),
+    )
+}
+
+/// Merge two DataFrames on one or more key columns with execution options.
+pub fn merge_dataframes_on_with_options(
+    left: &fp_frame::DataFrame,
+    right: &fp_frame::DataFrame,
+    left_on: &[&str],
+    right_on: &[&str],
+    join_type: JoinType,
+    options: MergeExecutionOptions,
+) -> Result<MergedDataFrame, JoinError> {
+    let indicator_name = resolve_merge_indicator_name(options.indicator_name.as_deref())?;
+
     if matches!(join_type, JoinType::Cross) {
-        return merge_dataframes_cross(left, right);
+        return merge_dataframes_cross(left, right, indicator_name.as_deref());
     }
 
     if left_on.is_empty() || right_on.is_empty() {
@@ -629,6 +705,17 @@ pub fn merge_dataframes_on_with(
         columns.insert(out_name, reindexed);
     }
 
+    if let Some(indicator_name) = indicator_name.as_deref() {
+        ensure_indicator_name_available(
+            indicator_name,
+            &left_col_names,
+            &right_col_names,
+            &columns,
+        )?;
+        let indicator_col = build_merge_indicator_column(&left_positions, &right_positions)?;
+        columns.insert(indicator_name.to_owned(), indicator_col);
+    }
+
     Ok(MergedDataFrame { index, columns })
 }
 
@@ -657,6 +744,7 @@ pub fn merge_dataframes(
 fn merge_dataframes_cross(
     left: &fp_frame::DataFrame,
     right: &fp_frame::DataFrame,
+    indicator_name: Option<&str>,
 ) -> Result<MergedDataFrame, JoinError> {
     let left_rows = left.index().len();
     let right_rows = right.index().len();
@@ -695,6 +783,17 @@ fn merge_dataframes_cross(
             name.clone()
         };
         columns.insert(out_name, reindexed);
+    }
+
+    if let Some(indicator_name) = indicator_name {
+        ensure_indicator_name_available(
+            indicator_name,
+            &left_col_names,
+            &right_col_names,
+            &columns,
+        )?;
+        let indicator_col = build_merge_indicator_column(&left_positions, &right_positions)?;
+        columns.insert(indicator_name.to_owned(), indicator_col);
     }
 
     Ok(MergedDataFrame { index, columns })
@@ -1118,7 +1217,10 @@ mod tests {
 
     // ---- DataFrame merge tests (bd-2gi.17) ----
 
-    use super::{merge_dataframes, merge_dataframes_on, merge_dataframes_on_with};
+    use super::{
+        MergeExecutionOptions, merge_dataframes, merge_dataframes_on, merge_dataframes_on_with,
+        merge_dataframes_on_with_options,
+    };
     use fp_frame::DataFrame;
 
     fn make_left_df() -> DataFrame {
@@ -1799,6 +1901,125 @@ mod tests {
         let err = merge_dataframes_on_with(&left, &right, &["id", "id"], &["id"], JoinType::Inner)
             .expect_err("should fail");
         assert!(format!("{err}").contains("equal length"));
+    }
+
+    #[test]
+    fn merge_indicator_default_name_tracks_row_provenance() {
+        let left = make_left_df();
+        let right = make_right_df();
+
+        let merged = merge_dataframes_on_with_options(
+            &left,
+            &right,
+            &["id"],
+            &["id"],
+            JoinType::Outer,
+            MergeExecutionOptions {
+                indicator_name: Some("_merge".to_owned()),
+            },
+        )
+        .expect("merge");
+
+        assert_eq!(
+            merged.columns.get("_merge").expect("indicator").values(),
+            &[
+                Scalar::Utf8("left_only".to_owned()),
+                Scalar::Utf8("both".to_owned()),
+                Scalar::Utf8("both".to_owned()),
+                Scalar::Utf8("right_only".to_owned())
+            ]
+        );
+    }
+
+    #[test]
+    fn merge_indicator_custom_name_preserves_suffix_behavior() {
+        let left = DataFrame::from_dict(
+            &["id", "val"],
+            vec![
+                ("id", vec![Scalar::Int64(1), Scalar::Int64(2)]),
+                ("val", vec![Scalar::Int64(10), Scalar::Int64(20)]),
+            ],
+        )
+        .unwrap();
+        let right = DataFrame::from_dict(
+            &["id", "val"],
+            vec![
+                ("id", vec![Scalar::Int64(2), Scalar::Int64(3)]),
+                ("val", vec![Scalar::Int64(200), Scalar::Int64(300)]),
+            ],
+        )
+        .unwrap();
+
+        let merged = merge_dataframes_on_with_options(
+            &left,
+            &right,
+            &["id"],
+            &["id"],
+            JoinType::Outer,
+            MergeExecutionOptions {
+                indicator_name: Some("origin".to_owned()),
+            },
+        )
+        .expect("merge");
+
+        assert!(merged.columns.contains_key("val_left"));
+        assert!(merged.columns.contains_key("val_right"));
+        assert_eq!(
+            merged.columns.get("origin").expect("indicator").values(),
+            &[
+                Scalar::Utf8("left_only".to_owned()),
+                Scalar::Utf8("both".to_owned()),
+                Scalar::Utf8("right_only".to_owned())
+            ]
+        );
+    }
+
+    #[test]
+    fn merge_indicator_rejects_conflicting_column_name() {
+        let left = make_left_df();
+        let right = make_right_df();
+
+        let err = merge_dataframes_on_with_options(
+            &left,
+            &right,
+            &["id"],
+            &["id"],
+            JoinType::Inner,
+            MergeExecutionOptions {
+                indicator_name: Some("id".to_owned()),
+            },
+        )
+        .expect_err("expected indicator name conflict");
+        assert!(format!("{err}").contains("conflicts with an existing column"));
+    }
+
+    #[test]
+    fn merge_cross_indicator_marks_all_rows_both() {
+        let left = DataFrame::from_dict(
+            &["l"],
+            vec![("l", vec![Scalar::Int64(1), Scalar::Int64(2)])],
+        )
+        .unwrap();
+        let right = DataFrame::from_dict(&["r"], vec![("r", vec![Scalar::Int64(9)])]).unwrap();
+
+        let merged = merge_dataframes_on_with_options(
+            &left,
+            &right,
+            &["ignored"],
+            &["ignored"],
+            JoinType::Cross,
+            MergeExecutionOptions {
+                indicator_name: Some("_merge".to_owned()),
+            },
+        )
+        .expect("cross merge");
+        assert_eq!(
+            merged.columns.get("_merge").expect("indicator").values(),
+            &[
+                Scalar::Utf8("both".to_owned()),
+                Scalar::Utf8("both".to_owned())
+            ]
+        );
     }
 
     #[test]

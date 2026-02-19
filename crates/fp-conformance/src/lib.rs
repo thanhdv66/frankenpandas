@@ -17,7 +17,7 @@ use fp_groupby::{
 };
 use fp_index::{AlignmentPlan, Index, IndexLabel, align_union, validate_alignment_plan};
 use fp_io::{read_csv_str, write_csv_string};
-use fp_join::{JoinType, join_series, merge_dataframes_on_with};
+use fp_join::{JoinType, MergeExecutionOptions, join_series, merge_dataframes_on_with_options};
 #[cfg(feature = "asupersync")]
 use fp_runtime::asupersync::{
     ArtifactCodec, ArtifactPayload, Fnv1aVerifier, IntegrityVerifier, PassthroughCodec,
@@ -402,6 +402,10 @@ pub struct PacketFixture {
     pub left_index: Option<bool>,
     #[serde(default)]
     pub right_index: Option<bool>,
+    #[serde(default)]
+    pub merge_indicator: Option<bool>,
+    #[serde(default)]
+    pub merge_indicator_name: Option<String>,
     #[serde(default)]
     pub expected_series: Option<FixtureExpectedSeries>,
     #[serde(default)]
@@ -1136,6 +1140,10 @@ struct OracleRequest {
     left_index: Option<bool>,
     #[serde(default)]
     right_index: Option<bool>,
+    #[serde(default)]
+    merge_indicator: Option<bool>,
+    #[serde(default)]
+    merge_indicator_name: Option<String>,
     #[serde(default)]
     fill_value: Option<Scalar>,
     #[serde(default)]
@@ -3876,6 +3884,8 @@ fn capture_live_oracle_expected(
         right_on_keys: fixture.right_on_keys.clone(),
         left_index: fixture.left_index,
         right_index: fixture.right_index,
+        merge_indicator: fixture.merge_indicator,
+        merge_indicator_name: fixture.merge_indicator_name.clone(),
         fill_value: fixture.fill_value.clone(),
         head_n: fixture.head_n,
         tail_n: fixture.tail_n,
@@ -4195,6 +4205,33 @@ fn resolve_merge_key_pairs(
 
     let keys = resolve_merge_on_keys(merge_on, merge_on_keys, operation_name, default_key)?;
     Ok((keys.clone(), keys))
+}
+
+fn resolve_merge_indicator_name(
+    merge_indicator: Option<bool>,
+    merge_indicator_name: Option<&str>,
+    operation_name: &str,
+) -> Result<Option<String>, String> {
+    if matches!(merge_indicator, Some(false)) && merge_indicator_name.is_some() {
+        return Err(format!(
+            "{operation_name} merge_indicator_name requires merge_indicator=true when explicitly provided"
+        ));
+    }
+
+    if let Some(name) = merge_indicator_name {
+        if name.trim().is_empty() {
+            return Err(format!(
+                "{operation_name} merge_indicator_name must be a non-empty string"
+            ));
+        }
+        return Ok(Some(name.to_owned()));
+    }
+
+    if merge_indicator.unwrap_or(false) {
+        return Ok(Some("_merge".to_owned()));
+    }
+
+    Ok(None)
 }
 
 fn normalize_concat_axis(fixture: &PacketFixture) -> Result<i64, String> {
@@ -4644,6 +4681,11 @@ fn execute_dataframe_merge_fixture_operation(
         operation_name,
         default_index_key,
     )?;
+    let indicator_name = resolve_merge_indicator_name(
+        fixture.merge_indicator,
+        fixture.merge_indicator_name.as_deref(),
+        operation_name,
+    )?;
 
     let left_input = if left_use_index {
         dataframe_with_index_as_columns(&left, &left_merge_keys)?
@@ -4664,12 +4706,13 @@ fn execute_dataframe_merge_fixture_operation(
         .iter()
         .map(String::as_str)
         .collect::<Vec<_>>();
-    let merged = merge_dataframes_on_with(
+    let merged = merge_dataframes_on_with_options(
         &left_input,
         &right_input,
         &left_merge_refs,
         &right_merge_refs,
         join_type,
+        MergeExecutionOptions { indicator_name },
     )
     .map_err(|err| err.to_string())?;
     DataFrame::new(merged.index, merged.columns).map_err(|err| err.to_string())
@@ -8124,6 +8167,19 @@ mod tests {
         assert!(
             report.fixture_count >= 3,
             "expected FP-P2D-033 dataframe composite-key merge fixtures"
+        );
+        assert!(report.is_green(), "expected report green: {report:?}");
+    }
+
+    #[test]
+    fn packet_filter_runs_dataframe_merge_indicator_packet() {
+        let cfg = HarnessConfig::default_paths();
+        let report =
+            run_packet_by_id(&cfg, "FP-P2D-034", OracleMode::FixtureExpected).expect("report");
+        assert_eq!(report.packet_id.as_deref(), Some("FP-P2D-034"));
+        assert!(
+            report.fixture_count >= 3,
+            "expected FP-P2D-034 dataframe merge indicator fixtures"
         );
         assert!(report.is_green(), "expected report green: {report:?}");
     }

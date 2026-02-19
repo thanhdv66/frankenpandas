@@ -1077,6 +1077,28 @@ def resolve_merge_key_pairs(
     )
 
 
+def resolve_merge_indicator(payload: dict[str, Any], op_name: str) -> bool | str | None:
+    indicator_raw = payload.get("merge_indicator")
+    if indicator_raw is not None and not isinstance(indicator_raw, bool):
+        raise OracleError(f"{op_name} merge_indicator must be a boolean when provided")
+
+    indicator_name_raw = payload.get("merge_indicator_name")
+    if indicator_name_raw is not None:
+        if not isinstance(indicator_name_raw, str):
+            raise OracleError(f"{op_name} merge_indicator_name must be a string when provided")
+        if not indicator_name_raw.strip():
+            raise OracleError(f"{op_name} merge_indicator_name must be a non-empty string")
+        if indicator_raw is not None and not indicator_raw:
+            raise OracleError(
+                f"{op_name} merge_indicator_name requires merge_indicator=true when explicitly provided"
+            )
+        return indicator_name_raw
+
+    if indicator_raw:
+        return True
+    return None
+
+
 def dataframe_with_index_keys(frame, key_names: list[str]):
     out = frame.copy()
     for key_name in key_names:
@@ -1106,30 +1128,27 @@ def op_dataframe_merge(
         op_name,
         default_key="__index_key" if left_use_index and right_use_index else None,
     )
+    indicator = resolve_merge_indicator(payload, op_name)
 
     if left_use_index:
         left = dataframe_with_index_keys(left, left_merge_keys)
     if right_use_index:
         right = dataframe_with_index_keys(right, right_merge_keys)
 
+    merge_kwargs = {
+        "how": how,
+        "sort": False,
+        "copy": False,
+        "suffixes": ("_left", "_right"),
+    }
+    if indicator is not None:
+        merge_kwargs["indicator"] = indicator
+
     if left_merge_keys == right_merge_keys:
-        out = left.merge(
-            right,
-            on=left_merge_keys,
-            how=how,
-            sort=False,
-            copy=False,
-            suffixes=("_left", "_right"),
-        )
+        out = left.merge(right, on=left_merge_keys, **merge_kwargs)
     else:
         out = left.merge(
-            right,
-            left_on=left_merge_keys,
-            right_on=right_merge_keys,
-            how=how,
-            sort=False,
-            copy=False,
-            suffixes=("_left", "_right"),
+            right, left_on=left_merge_keys, right_on=right_merge_keys, **merge_kwargs
         )
     return {"expected_frame": dataframe_to_json(out)}
 

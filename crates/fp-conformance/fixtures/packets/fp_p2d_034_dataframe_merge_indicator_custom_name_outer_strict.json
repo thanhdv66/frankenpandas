@@ -1,0 +1,71 @@
+{
+  "packet_id": "FP-P2D-034",
+  "case_id": "dataframe_merge_indicator_custom_name_outer_strict",
+  "mode": "strict",
+  "operation": "dataframe_merge",
+  "join_type": "outer",
+  "merge_on": "id",
+  "merge_indicator": true,
+  "merge_indicator_name": "origin",
+  "frame": {
+    "index": [
+      { "kind": "int64", "value": 0 },
+      { "kind": "int64", "value": 1 }
+    ],
+    "columns": {
+      "id": [
+        { "kind": "int64", "value": 1 },
+        { "kind": "int64", "value": 2 }
+      ],
+      "val": [
+        { "kind": "int64", "value": 10 },
+        { "kind": "int64", "value": 20 }
+      ]
+    }
+  },
+  "frame_right": {
+    "index": [
+      { "kind": "int64", "value": 5 },
+      { "kind": "int64", "value": 6 }
+    ],
+    "columns": {
+      "id": [
+        { "kind": "int64", "value": 2 },
+        { "kind": "int64", "value": 3 }
+      ],
+      "val": [
+        { "kind": "int64", "value": 200 },
+        { "kind": "int64", "value": 300 }
+      ]
+    }
+  },
+  "expected_frame": {
+    "index": [
+      { "kind": "int64", "value": 0 },
+      { "kind": "int64", "value": 1 },
+      { "kind": "int64", "value": 2 }
+    ],
+    "columns": {
+      "id": [
+        { "kind": "int64", "value": 1 },
+        { "kind": "int64", "value": 2 },
+        { "kind": "int64", "value": 3 }
+      ],
+      "origin": [
+        { "kind": "utf8", "value": "left_only" },
+        { "kind": "utf8", "value": "both" },
+        { "kind": "utf8", "value": "right_only" }
+      ],
+      "val_left": [
+        { "kind": "int64", "value": 10 },
+        { "kind": "int64", "value": 20 },
+        { "kind": "null", "value": "null" }
+      ],
+      "val_right": [
+        { "kind": "null", "value": "null" },
+        { "kind": "int64", "value": 200 },
+        { "kind": "int64", "value": 300 }
+      ]
+    }
+  }
+}
