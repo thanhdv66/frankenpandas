@@ -658,6 +658,34 @@ impl Series {
         Self::from_values(self.name.clone(), new_labels, new_values)
     }
 
+    /// Return a boolean mask where missing values are `true`.
+    ///
+    /// Matches `pd.Series.isna()`.
+    pub fn isna(&self) -> Result<Self, FrameError> {
+        let labels = self.index.labels().to_vec();
+        let values = self
+            .column
+            .values()
+            .iter()
+            .map(|value| Scalar::Bool(value.is_missing()))
+            .collect::<Vec<_>>();
+        Self::from_values(self.name.clone(), labels, values)
+    }
+
+    /// Return a boolean mask where non-missing values are `true`.
+    ///
+    /// Matches `pd.Series.notna()`.
+    pub fn notna(&self) -> Result<Self, FrameError> {
+        let labels = self.index.labels().to_vec();
+        let values = self
+            .column
+            .values()
+            .iter()
+            .map(|value| Scalar::Bool(!value.is_missing()))
+            .collect::<Vec<_>>();
+        Self::from_values(self.name.clone(), labels, values)
+    }
+
     /// Return the number of non-null elements.
     ///
     /// Matches `pd.Series.count()`.
@@ -1479,6 +1507,48 @@ impl DataFrame {
             new_columns,
             self.column_order.clone(),
         )
+    }
+
+    /// Return a DataFrame of booleans indicating missing values.
+    ///
+    /// Matches `df.isna()`.
+    pub fn isna(&self) -> Result<Self, FrameError> {
+        let mut columns = BTreeMap::new();
+        for name in &self.column_order {
+            let column = self
+                .columns
+                .get(name)
+                .expect("column name listed in order must exist");
+            let mask_values = column
+                .values()
+                .iter()
+                .map(|value| Scalar::Bool(value.is_missing()))
+                .collect::<Vec<_>>();
+            columns.insert(name.clone(), Column::from_values(mask_values)?);
+        }
+
+        Self::new_with_column_order(self.index.clone(), columns, self.column_order.clone())
+    }
+
+    /// Return a DataFrame of booleans indicating non-missing values.
+    ///
+    /// Matches `df.notna()`.
+    pub fn notna(&self) -> Result<Self, FrameError> {
+        let mut columns = BTreeMap::new();
+        for name in &self.column_order {
+            let column = self
+                .columns
+                .get(name)
+                .expect("column name listed in order must exist");
+            let mask_values = column
+                .values()
+                .iter()
+                .map(|value| Scalar::Bool(!value.is_missing()))
+                .collect::<Vec<_>>();
+            columns.insert(name.clone(), Column::from_values(mask_values)?);
+        }
+
+        Self::new_with_column_order(self.index.clone(), columns, self.column_order.clone())
     }
 
     /// Fill missing values in each column with `fill_value`.
@@ -3417,6 +3487,43 @@ mod tests {
         assert_eq!(result.index().labels(), &[1_i64.into(), 3_i64.into()]);
     }
 
+    #[test]
+    fn series_isna_notna_flags_null_and_nan() {
+        let s = Series::from_values(
+            "vals",
+            vec![1_i64.into(), 2_i64.into(), 3_i64.into(), 4_i64.into()],
+            vec![
+                Scalar::Int64(10),
+                Scalar::Null(NullKind::Null),
+                Scalar::Float64(f64::NAN),
+                Scalar::Bool(false),
+            ],
+        )
+        .unwrap();
+
+        let isna = s.isna().unwrap();
+        assert_eq!(
+            isna.values(),
+            &[
+                Scalar::Bool(false),
+                Scalar::Bool(true),
+                Scalar::Bool(true),
+                Scalar::Bool(false)
+            ]
+        );
+
+        let notna = s.notna().unwrap();
+        assert_eq!(
+            notna.values(),
+            &[
+                Scalar::Bool(true),
+                Scalar::Bool(false),
+                Scalar::Bool(false),
+                Scalar::Bool(true)
+            ]
+        );
+    }
+
     // ---- Series descriptive statistics tests ----
 
     #[test]
@@ -3825,6 +3932,52 @@ mod tests {
         assert_eq!(dropped.index().labels(), &[IndexLabel::from(2_i64)]);
         assert_eq!(dropped.column("a").unwrap().values(), &[Scalar::Int64(3)]);
         assert_eq!(dropped.column("b").unwrap().values(), &[Scalar::Int64(30)]);
+    }
+
+    #[test]
+    fn dataframe_isna_notna_flags_missing_per_cell() {
+        let df = DataFrame::from_dict(
+            &["a", "b"],
+            vec![
+                (
+                    "a",
+                    vec![
+                        Scalar::Int64(1),
+                        Scalar::Null(NullKind::Null),
+                        Scalar::Float64(f64::NAN),
+                    ],
+                ),
+                (
+                    "b",
+                    vec![
+                        Scalar::Null(NullKind::Null),
+                        Scalar::Int64(20),
+                        Scalar::Int64(30),
+                    ],
+                ),
+            ],
+        )
+        .unwrap();
+
+        let isna = df.isna().unwrap();
+        assert_eq!(
+            isna.column("a").unwrap().values(),
+            &[Scalar::Bool(false), Scalar::Bool(true), Scalar::Bool(true)]
+        );
+        assert_eq!(
+            isna.column("b").unwrap().values(),
+            &[Scalar::Bool(true), Scalar::Bool(false), Scalar::Bool(false)]
+        );
+
+        let notna = df.notna().unwrap();
+        assert_eq!(
+            notna.column("a").unwrap().values(),
+            &[Scalar::Bool(true), Scalar::Bool(false), Scalar::Bool(false)]
+        );
+        assert_eq!(
+            notna.column("b").unwrap().values(),
+            &[Scalar::Bool(false), Scalar::Bool(true), Scalar::Bool(true)]
+        );
     }
 
     #[test]
