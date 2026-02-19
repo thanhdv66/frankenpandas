@@ -16,6 +16,9 @@ pub struct SeriesRef(pub String);
 pub enum Expr {
     Series { name: SeriesRef },
     Add { left: Box<Expr>, right: Box<Expr> },
+    Sub { left: Box<Expr>, right: Box<Expr> },
+    Mul { left: Box<Expr>, right: Box<Expr> },
+    Div { left: Box<Expr>, right: Box<Expr> },
     Literal { value: Scalar },
 }
 
@@ -67,6 +70,24 @@ pub fn evaluate(
             let lhs = evaluate(left, context, policy, ledger)?;
             let rhs = evaluate(right, context, policy, ledger)?;
             lhs.add_with_policy(&rhs, policy, ledger)
+                .map_err(ExprError::from)
+        }
+        Expr::Sub { left, right } => {
+            let lhs = evaluate(left, context, policy, ledger)?;
+            let rhs = evaluate(right, context, policy, ledger)?;
+            lhs.sub_with_policy(&rhs, policy, ledger)
+                .map_err(ExprError::from)
+        }
+        Expr::Mul { left, right } => {
+            let lhs = evaluate(left, context, policy, ledger)?;
+            let rhs = evaluate(right, context, policy, ledger)?;
+            lhs.mul_with_policy(&rhs, policy, ledger)
+                .map_err(ExprError::from)
+        }
+        Expr::Div { left, right } => {
+            let lhs = evaluate(left, context, policy, ledger)?;
+            let rhs = evaluate(right, context, policy, ledger)?;
+            lhs.div_with_policy(&rhs, policy, ledger)
                 .map_err(ExprError::from)
         }
         Expr::Literal { .. } => Err(ExprError::UnanchoredLiteral),
@@ -151,7 +172,10 @@ impl MaterializedView {
     fn is_linear(expr: &Expr) -> bool {
         match expr {
             Expr::Series { .. } => true,
-            Expr::Add { left, right } => Self::is_linear(left) && Self::is_linear(right),
+            Expr::Add { left, right }
+            | Expr::Sub { left, right }
+            | Expr::Mul { left, right }
+            | Expr::Div { left, right } => Self::is_linear(left) && Self::is_linear(right),
             Expr::Literal { .. } => false,
         }
     }
@@ -191,6 +215,24 @@ fn evaluate_delta(
             let lhs = evaluate_delta(left, delta_ctx, delta, policy, ledger)?;
             let rhs = evaluate_delta(right, delta_ctx, delta, policy, ledger)?;
             lhs.add_with_policy(&rhs, policy, ledger)
+                .map_err(ExprError::from)
+        }
+        Expr::Sub { left, right } => {
+            let lhs = evaluate_delta(left, delta_ctx, delta, policy, ledger)?;
+            let rhs = evaluate_delta(right, delta_ctx, delta, policy, ledger)?;
+            lhs.sub_with_policy(&rhs, policy, ledger)
+                .map_err(ExprError::from)
+        }
+        Expr::Mul { left, right } => {
+            let lhs = evaluate_delta(left, delta_ctx, delta, policy, ledger)?;
+            let rhs = evaluate_delta(right, delta_ctx, delta, policy, ledger)?;
+            lhs.mul_with_policy(&rhs, policy, ledger)
+                .map_err(ExprError::from)
+        }
+        Expr::Div { left, right } => {
+            let lhs = evaluate_delta(left, delta_ctx, delta, policy, ledger)?;
+            let rhs = evaluate_delta(right, delta_ctx, delta, policy, ledger)?;
+            lhs.div_with_policy(&rhs, policy, ledger)
                 .map_err(ExprError::from)
         }
         Expr::Literal { .. } => Err(ExprError::UnanchoredLiteral),
@@ -244,6 +286,81 @@ mod tests {
         )
         .expect("eval");
         assert_eq!(out.values()[1], Scalar::Int64(12));
+    }
+
+    #[test]
+    fn expression_sub_mul_div_work_through_series_refs() {
+        let a = Series::from_values(
+            "a",
+            vec![1_i64.into(), 2_i64.into()],
+            vec![Scalar::Int64(8), Scalar::Int64(6)],
+        )
+        .expect("a");
+        let b = Series::from_values(
+            "b",
+            vec![1_i64.into(), 2_i64.into()],
+            vec![Scalar::Int64(2), Scalar::Int64(3)],
+        )
+        .expect("b");
+
+        let mut ctx = EvalContext::new();
+        ctx.insert_series(a);
+        ctx.insert_series(b);
+        let policy = RuntimePolicy::hardened(Some(10_000));
+
+        let mut ledger = EvidenceLedger::new();
+        let sub_out = evaluate(
+            &Expr::Sub {
+                left: Box::new(Expr::Series {
+                    name: SeriesRef("a".to_owned()),
+                }),
+                right: Box::new(Expr::Series {
+                    name: SeriesRef("b".to_owned()),
+                }),
+            },
+            &ctx,
+            &policy,
+            &mut ledger,
+        )
+        .expect("sub eval");
+        assert_eq!(sub_out.values(), &[Scalar::Int64(6), Scalar::Int64(3)]);
+
+        let mut ledger = EvidenceLedger::new();
+        let mul_out = evaluate(
+            &Expr::Mul {
+                left: Box::new(Expr::Series {
+                    name: SeriesRef("a".to_owned()),
+                }),
+                right: Box::new(Expr::Series {
+                    name: SeriesRef("b".to_owned()),
+                }),
+            },
+            &ctx,
+            &policy,
+            &mut ledger,
+        )
+        .expect("mul eval");
+        assert_eq!(mul_out.values(), &[Scalar::Int64(16), Scalar::Int64(18)]);
+
+        let mut ledger = EvidenceLedger::new();
+        let div_out = evaluate(
+            &Expr::Div {
+                left: Box::new(Expr::Series {
+                    name: SeriesRef("a".to_owned()),
+                }),
+                right: Box::new(Expr::Series {
+                    name: SeriesRef("b".to_owned()),
+                }),
+            },
+            &ctx,
+            &policy,
+            &mut ledger,
+        )
+        .expect("div eval");
+        assert_eq!(
+            div_out.values(),
+            &[Scalar::Float64(4.0), Scalar::Float64(2.0)]
+        );
     }
 
     // === AG-15: Incremental View Maintenance Tests ===
@@ -381,6 +498,70 @@ mod tests {
     }
 
     #[test]
+    fn ivm_append_delta_mul_expression() {
+        let a = make_series("a", vec![0, 1], vec![Scalar::Int64(2), Scalar::Int64(3)]);
+        let b = make_series("b", vec![0, 1], vec![Scalar::Int64(4), Scalar::Int64(5)]);
+        let mut ctx = EvalContext::new();
+        ctx.insert_series(a);
+        ctx.insert_series(b);
+
+        let expr = Expr::Mul {
+            left: Box::new(Expr::Series {
+                name: SeriesRef("a".into()),
+            }),
+            right: Box::new(Expr::Series {
+                name: SeriesRef("b".into()),
+            }),
+        };
+        let mut ledger = EvidenceLedger::new();
+        let policy = RuntimePolicy::hardened(Some(10_000));
+
+        let mut view =
+            MaterializedView::from_full_eval(&expr, &ctx, &policy, &mut ledger).expect("base");
+        assert_eq!(view.result.values(), &[Scalar::Int64(8), Scalar::Int64(15)]);
+
+        let delta = Delta {
+            series_name: "a".into(),
+            new_labels: vec![2_i64.into(), 3_i64.into()],
+            new_values: vec![Scalar::Int64(4), Scalar::Int64(6)],
+        };
+        let a_full = make_series(
+            "a",
+            vec![0, 1, 2, 3],
+            vec![
+                Scalar::Int64(2),
+                Scalar::Int64(3),
+                Scalar::Int64(4),
+                Scalar::Int64(6),
+            ],
+        );
+        let b_full = make_series(
+            "b",
+            vec![0, 1, 2, 3],
+            vec![
+                Scalar::Int64(4),
+                Scalar::Int64(5),
+                Scalar::Int64(6),
+                Scalar::Int64(7),
+            ],
+        );
+        ctx.insert_series(a_full);
+        ctx.insert_series(b_full);
+
+        view.apply_delta(&delta, &ctx, &policy, &mut ledger)
+            .expect("delta");
+        assert_eq!(
+            view.result.values(),
+            &[
+                Scalar::Int64(8),
+                Scalar::Int64(15),
+                Scalar::Int64(24),
+                Scalar::Int64(42)
+            ]
+        );
+    }
+
+    #[test]
     fn ivm_isomorphism_incremental_matches_full() {
         // The key correctness property: incremental result must equal full re-eval.
         let a = make_series("a", vec![0, 1], vec![Scalar::Int64(5), Scalar::Int64(10)]);
@@ -506,6 +687,30 @@ mod tests {
             name: SeriesRef("a".into()),
         }));
         assert!(MaterializedView::is_linear(&Expr::Add {
+            left: Box::new(Expr::Series {
+                name: SeriesRef("a".into()),
+            }),
+            right: Box::new(Expr::Series {
+                name: SeriesRef("b".into()),
+            }),
+        }));
+        assert!(MaterializedView::is_linear(&Expr::Sub {
+            left: Box::new(Expr::Series {
+                name: SeriesRef("a".into()),
+            }),
+            right: Box::new(Expr::Series {
+                name: SeriesRef("b".into()),
+            }),
+        }));
+        assert!(MaterializedView::is_linear(&Expr::Mul {
+            left: Box::new(Expr::Series {
+                name: SeriesRef("a".into()),
+            }),
+            right: Box::new(Expr::Series {
+                name: SeriesRef("b".into()),
+            }),
+        }));
+        assert!(MaterializedView::is_linear(&Expr::Div {
             left: Box::new(Expr::Series {
                 name: SeriesRef("a".into()),
             }),
