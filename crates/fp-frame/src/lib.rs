@@ -1146,6 +1146,33 @@ impl DataFrame {
         Ok(selected)
     }
 
+    fn resolve_row_label_selector(
+        &self,
+        row_selector: Option<&[IndexLabel]>,
+    ) -> Result<Vec<usize>, FrameError> {
+        let Some(requested_rows) = row_selector else {
+            return Ok((0..self.len()).collect());
+        };
+
+        let mut selected_positions = Vec::new();
+        for requested in requested_rows {
+            let mut found = false;
+            for (position, actual) in self.index.labels().iter().enumerate() {
+                if actual == requested {
+                    selected_positions.push(position);
+                    found = true;
+                }
+            }
+            if !found {
+                return Err(FrameError::CompatibilityRejected(format!(
+                    "index label '{requested}' not found"
+                )));
+            }
+        }
+
+        Ok(selected_positions)
+    }
+
     fn reorder_rows_by_positions(&self, positions: &[usize]) -> Result<Self, FrameError> {
         if positions.len() != self.len() {
             return Err(FrameError::CompatibilityRejected(format!(
@@ -1619,6 +1646,55 @@ impl DataFrame {
             keep.into_iter().map(Scalar::Bool).collect::<Vec<_>>(),
         )?;
         self.filter_rows(&mask)
+    }
+
+    /// Drop columns by configurable missing-value policy.
+    ///
+    /// Matches `df.dropna(axis=1, how=..., subset=...)` where `subset` selects
+    /// row labels to consider during missing-value checks.
+    pub fn dropna_columns_with_options(
+        &self,
+        how: DropNaHow,
+        subset: Option<&[IndexLabel]>,
+    ) -> Result<Self, FrameError> {
+        if self.column_order.is_empty() {
+            return Ok(self.clone());
+        }
+
+        let selected_rows = self.resolve_row_label_selector(subset)?;
+        if selected_rows.is_empty() {
+            return Ok(self.clone());
+        }
+
+        let mut keep_columns = Vec::with_capacity(self.column_order.len());
+        for name in &self.column_order {
+            let column = self.columns.get(name).expect("selected column must exist");
+            let mut missing_count = 0_usize;
+            for &row_position in &selected_rows {
+                if column.values()[row_position].is_missing() {
+                    missing_count += 1;
+                }
+            }
+
+            let column_keep = match how {
+                DropNaHow::Any => missing_count == 0,
+                DropNaHow::All => missing_count < selected_rows.len(),
+            };
+            if column_keep {
+                keep_columns.push(name.clone());
+            }
+        }
+
+        let mut columns = BTreeMap::new();
+        for name in &keep_columns {
+            let column = self
+                .columns
+                .get(name)
+                .expect("column name listed in order must exist");
+            columns.insert(name.clone(), column.clone());
+        }
+
+        Self::new_with_column_order(self.index.clone(), columns, keep_columns)
     }
 
     /// Return the first `n` rows.
@@ -4038,6 +4114,164 @@ mod tests {
         assert!(matches!(
             err,
             FrameError::CompatibilityRejected(msg) if msg.contains("duplicate column selector")
+        ));
+    }
+
+    #[test]
+    fn dataframe_dropna_columns_with_options_how_any_drops_columns_with_any_missing() {
+        let df = DataFrame::from_dict(
+            &["a", "b", "c", "d"],
+            vec![
+                (
+                    "a",
+                    vec![Scalar::Int64(1), Scalar::Int64(2), Scalar::Int64(3)],
+                ),
+                (
+                    "b",
+                    vec![
+                        Scalar::Null(NullKind::Null),
+                        Scalar::Int64(20),
+                        Scalar::Int64(30),
+                    ],
+                ),
+                (
+                    "c",
+                    vec![
+                        Scalar::Int64(10),
+                        Scalar::Null(NullKind::Null),
+                        Scalar::Int64(30),
+                    ],
+                ),
+                (
+                    "d",
+                    vec![
+                        Scalar::Null(NullKind::Null),
+                        Scalar::Null(NullKind::Null),
+                        Scalar::Int64(30),
+                    ],
+                ),
+            ],
+        )
+        .unwrap();
+
+        let dropped = df
+            .dropna_columns_with_options(DropNaHow::Any, None)
+            .unwrap();
+        let column_names = dropped
+            .column_names()
+            .into_iter()
+            .cloned()
+            .collect::<Vec<_>>();
+        assert_eq!(column_names, vec!["a".to_owned()]);
+        assert_eq!(
+            dropped.column("a").unwrap().values(),
+            df.column("a").unwrap().values()
+        );
+    }
+
+    #[test]
+    fn dataframe_dropna_columns_with_options_how_all_drops_only_all_missing_columns() {
+        let df = DataFrame::from_dict(
+            &["a", "b", "c"],
+            vec![
+                (
+                    "a",
+                    vec![
+                        Scalar::Null(NullKind::Null),
+                        Scalar::Null(NullKind::Null),
+                        Scalar::Int64(3),
+                    ],
+                ),
+                (
+                    "b",
+                    vec![
+                        Scalar::Null(NullKind::Null),
+                        Scalar::Null(NullKind::Null),
+                        Scalar::Null(NullKind::Null),
+                    ],
+                ),
+                (
+                    "c",
+                    vec![Scalar::Int64(1), Scalar::Int64(2), Scalar::Int64(3)],
+                ),
+            ],
+        )
+        .unwrap();
+
+        let dropped = df
+            .dropna_columns_with_options(DropNaHow::All, None)
+            .unwrap();
+        let column_names = dropped
+            .column_names()
+            .into_iter()
+            .cloned()
+            .collect::<Vec<_>>();
+        assert_eq!(column_names, vec!["a".to_owned(), "c".to_owned()]);
+    }
+
+    #[test]
+    fn dataframe_dropna_columns_with_options_subset_scopes_row_checks() {
+        let df = DataFrame::from_dict_with_index(
+            vec![
+                (
+                    "a",
+                    vec![
+                        Scalar::Null(NullKind::Null),
+                        Scalar::Int64(1),
+                        Scalar::Int64(2),
+                    ],
+                ),
+                (
+                    "b",
+                    vec![
+                        Scalar::Int64(5),
+                        Scalar::Null(NullKind::Null),
+                        Scalar::Int64(6),
+                    ],
+                ),
+                (
+                    "c",
+                    vec![Scalar::Int64(7), Scalar::Int64(8), Scalar::Int64(9)],
+                ),
+            ],
+            vec!["r0".into(), "r1".into(), "r2".into()],
+        )
+        .unwrap();
+
+        let subset = vec![IndexLabel::from("r0")];
+        let dropped = df
+            .dropna_columns_with_options(DropNaHow::Any, Some(&subset))
+            .unwrap();
+        let column_names = dropped
+            .column_names()
+            .into_iter()
+            .cloned()
+            .collect::<Vec<_>>();
+        assert_eq!(column_names, vec!["b".to_owned(), "c".to_owned()]);
+    }
+
+    #[test]
+    fn dataframe_dropna_columns_with_options_rejects_missing_subset_label() {
+        let df = DataFrame::from_dict_with_index(
+            vec![(
+                "a",
+                vec![
+                    Scalar::Int64(1),
+                    Scalar::Null(NullKind::Null),
+                    Scalar::Int64(3),
+                ],
+            )],
+            vec!["r0".into(), "r1".into(), "r2".into()],
+        )
+        .unwrap();
+
+        let subset = vec![IndexLabel::from("missing")];
+        let err = df
+            .dropna_columns_with_options(DropNaHow::Any, Some(&subset))
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            FrameError::CompatibilityRejected(msg) if msg.contains("index label 'missing' not found")
         ));
     }
 
