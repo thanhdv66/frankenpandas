@@ -2,6 +2,7 @@
 name = "fp-frame"
 version = "0.1.0"
 edition = "2024"
+license-file = "../../LICENSE"
 
 [dependencies]
 fp-columnar = { path = "../fp-columnar" }

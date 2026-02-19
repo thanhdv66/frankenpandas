@@ -2,6 +2,7 @@
 name = "fp-frankentui"
 version = "0.1.0"
 edition = "2024"
+license-file = "../../LICENSE"
 
 [dependencies]
 fp-conformance = { path = "../fp-conformance" }

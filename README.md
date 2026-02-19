@@ -118,6 +118,8 @@ Maintain deterministic null propagation, NaN handling, dtype promotion, and outp
 
 This command regenerates packet artifacts and fails closed if any packet parity report or packet gate is not green.
 
+If `rch` is installed, the script automatically offloads the expensive `cargo run` to the remote worker fleet. Set `FP_NO_RCH=1` to force local execution.
+
 ## Porting Artifact Set
 
 - PLAN_TO_PORT_PANDAS_TO_RUST.md
@@ -126,3 +128,7 @@ This command regenerates packet artifacts and fails closed if any packet parity 
 - FEATURE_PARITY.md
 
 These four docs are now the canonical porting-to-rust workflow for this repo.
+
+## License
+
+MIT License (with OpenAI/Anthropic Rider). See `LICENSE`.
