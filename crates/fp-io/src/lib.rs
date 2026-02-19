@@ -245,8 +245,15 @@ pub fn read_csv_with_options(input: &str, options: &CsvReadOptions) -> Result<Da
 // ── File-based CSV ─────────────────────────────────────────────────────
 
 pub fn read_csv(path: &Path) -> Result<DataFrame, IoError> {
+    read_csv_with_options_path(path, &CsvReadOptions::default())
+}
+
+pub fn read_csv_with_options_path(
+    path: &Path,
+    options: &CsvReadOptions,
+) -> Result<DataFrame, IoError> {
     let content = std::fs::read_to_string(path)?;
-    read_csv_str(&content)
+    read_csv_with_options(&content, options)
 }
 
 pub fn write_csv(frame: &DataFrame, path: &Path) -> Result<(), IoError> {
@@ -1059,6 +1066,32 @@ mod tests {
         super::write_csv(&frame, &path).expect("write file");
         let frame2 = super::read_csv(&path).expect("read file");
         assert_eq!(frame2.index().len(), 2);
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn file_csv_with_options_path() {
+        let input = "id\tval\na\tNA\nb\t2\n";
+        let dir = std::env::temp_dir();
+        let path = dir.join("fp_io_test_options.csv");
+        std::fs::write(&path, input).expect("write fixture");
+
+        let options = CsvReadOptions {
+            delimiter: b'\t',
+            na_values: vec!["NA".into()],
+            index_col: Some("id".into()),
+            ..Default::default()
+        };
+
+        let frame = super::read_csv_with_options_path(&path, &options).expect("read with options");
+        assert_eq!(
+            frame.index().labels()[0],
+            fp_index::IndexLabel::Utf8("a".into())
+        );
+        assert!(frame.column("id").is_none());
+        assert!(frame.column("val").unwrap().values()[0].is_missing());
+        assert_eq!(frame.column("val").unwrap().values()[1], Scalar::Int64(2));
+
         std::fs::remove_file(&path).ok();
     }
 
