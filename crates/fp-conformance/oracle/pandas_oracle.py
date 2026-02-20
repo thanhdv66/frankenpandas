@@ -876,6 +876,161 @@ def op_series_head(pd, payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def op_series_tail(pd, payload: dict[str, Any]) -> dict[str, Any]:
+    left = payload.get("left")
+    tail_n = payload.get("tail_n")
+    if left is None:
+        raise OracleError("series_tail requires left payload")
+    if tail_n is None:
+        raise OracleError("series_tail requires tail_n payload")
+
+    index = [label_from_json(item) for item in left["index"]]
+    values = [scalar_from_json(item) for item in left["values"]]
+
+    try:
+        n = int(tail_n)
+    except Exception as exc:  # pragma: no cover - defensive conversion
+        raise OracleError(f"series_tail tail_n must be an integer: {exc}") from exc
+
+    series = pd.Series(values, index=index, name=left.get("name", "series"))
+    out = series.tail(n)
+
+    return {
+        "expected_series": {
+            "index": [label_to_json(v) for v in out.index.tolist()],
+            "values": [scalar_to_json(v) for v in out.tolist()],
+        }
+    }
+
+
+def op_series_isna(pd, payload: dict[str, Any]) -> dict[str, Any]:
+    left = payload.get("left")
+    if left is None:
+        raise OracleError("series_isna requires left payload")
+
+    index = [label_from_json(item) for item in left["index"]]
+    values = [scalar_from_json(item) for item in left["values"]]
+    series = pd.Series(values, index=index, name=left.get("name", "series"))
+    out = series.isna()
+
+    return {
+        "expected_series": {
+            "index": [label_to_json(v) for v in out.index.tolist()],
+            "values": [scalar_to_json(v) for v in out.tolist()],
+        }
+    }
+
+
+def op_series_notna(pd, payload: dict[str, Any]) -> dict[str, Any]:
+    left = payload.get("left")
+    if left is None:
+        raise OracleError("series_notna requires left payload")
+
+    index = [label_from_json(item) for item in left["index"]]
+    values = [scalar_from_json(item) for item in left["values"]]
+    series = pd.Series(values, index=index, name=left.get("name", "series"))
+    out = series.notna()
+
+    return {
+        "expected_series": {
+            "index": [label_to_json(v) for v in out.index.tolist()],
+            "values": [scalar_to_json(v) for v in out.tolist()],
+        }
+    }
+
+
+def op_series_isnull(pd, payload: dict[str, Any]) -> dict[str, Any]:
+    left = payload.get("left")
+    if left is None:
+        raise OracleError("series_isnull requires left payload")
+
+    index = [label_from_json(item) for item in left["index"]]
+    values = [scalar_from_json(item) for item in left["values"]]
+    series = pd.Series(values, index=index, name=left.get("name", "series"))
+    out = series.isnull()
+
+    return {
+        "expected_series": {
+            "index": [label_to_json(v) for v in out.index.tolist()],
+            "values": [scalar_to_json(v) for v in out.tolist()],
+        }
+    }
+
+
+def op_series_notnull(pd, payload: dict[str, Any]) -> dict[str, Any]:
+    left = payload.get("left")
+    if left is None:
+        raise OracleError("series_notnull requires left payload")
+
+    index = [label_from_json(item) for item in left["index"]]
+    values = [scalar_from_json(item) for item in left["values"]]
+    series = pd.Series(values, index=index, name=left.get("name", "series"))
+    out = series.notnull()
+
+    return {
+        "expected_series": {
+            "index": [label_to_json(v) for v in out.index.tolist()],
+            "values": [scalar_to_json(v) for v in out.tolist()],
+        }
+    }
+
+
+def op_series_fillna(pd, payload: dict[str, Any]) -> dict[str, Any]:
+    left = payload.get("left")
+    fill_value_payload = payload.get("fill_value")
+    if left is None:
+        raise OracleError("series_fillna requires left payload")
+    if fill_value_payload is None:
+        raise OracleError("series_fillna requires fill_value payload")
+
+    index = [label_from_json(item) for item in left["index"]]
+    values = [scalar_from_json(item) for item in left["values"]]
+    fill_value = scalar_from_json(fill_value_payload)
+    series = pd.Series(values, index=index, name=left.get("name", "series"))
+    try:
+        out = series.fillna(fill_value)
+    except Exception as exc:
+        raise OracleError(f"series_fillna failed: {exc}") from exc
+
+    return {
+        "expected_series": {
+            "index": [label_to_json(v) for v in out.index.tolist()],
+            "values": [scalar_to_json(v) for v in out.tolist()],
+        }
+    }
+
+
+def op_series_dropna(pd, payload: dict[str, Any]) -> dict[str, Any]:
+    left = payload.get("left")
+    if left is None:
+        raise OracleError("series_dropna requires left payload")
+
+    index = [label_from_json(item) for item in left["index"]]
+    values = [scalar_from_json(item) for item in left["values"]]
+    series = pd.Series(values, index=index, name=left.get("name", "series"))
+    out = series.dropna()
+
+    return {
+        "expected_series": {
+            "index": [label_to_json(v) for v in out.index.tolist()],
+            "values": [scalar_to_json(v) for v in out.tolist()],
+        }
+    }
+
+
+def op_series_count(pd, payload: dict[str, Any]) -> dict[str, Any]:
+    left = payload.get("left")
+    if left is None:
+        raise OracleError("series_count requires left payload")
+
+    index = [label_from_json(item) for item in left["index"]]
+    values = [scalar_from_json(item) for item in left["values"]]
+    series = pd.Series(values, index=index, name=left.get("name", "series"))
+    out = int(series.count())
+
+    return {"expected_scalar": scalar_to_json(out)}
+
+
 def op_series_any(pd, payload: dict[str, Any]) -> dict[str, Any]:
     left = payload.get("left")
     if left is None:
@@ -896,6 +1051,62 @@ def op_series_all(pd, payload: dict[str, Any]) -> dict[str, Any]:
     values = [scalar_from_json(item) for item in left["values"]]
     series = pd.Series(values, index=index, name=left.get("name", "series"))
     return {"expected_bool": bool(series.all(skipna=True))}
+
+
+def op_series_value_counts(pd, payload: dict[str, Any]) -> dict[str, Any]:
+    left = payload.get("left")
+    if left is None:
+        raise OracleError("series_value_counts requires left payload")
+
+    index = [label_from_json(item) for item in left["index"]]
+    values = [scalar_from_json(item) for item in left["values"]]
+    series = pd.Series(values, index=index, name=left.get("name", "series"))
+    out = series.value_counts(dropna=True)
+
+    return {
+        "expected_series": {
+            "index": [label_to_json(v) for v in out.index.tolist()],
+            "values": [scalar_to_json(v) for v in out.tolist()],
+        }
+    }
+
+
+def op_series_sort_index(pd, payload: dict[str, Any]) -> dict[str, Any]:
+    left = payload.get("left")
+    if left is None:
+        raise OracleError("series_sort_index requires left payload")
+
+    ascending = payload.get("sort_ascending", True)
+    index = [label_from_json(item) for item in left["index"]]
+    values = [scalar_from_json(item) for item in left["values"]]
+    series = pd.Series(values, index=index, name=left.get("name", "series"))
+    out = series.sort_index(ascending=bool(ascending))
+
+    return {
+        "expected_series": {
+            "index": [label_to_json(v) for v in out.index.tolist()],
+            "values": [scalar_to_json(v) for v in out.tolist()],
+        }
+    }
+
+
+def op_series_sort_values(pd, payload: dict[str, Any]) -> dict[str, Any]:
+    left = payload.get("left")
+    if left is None:
+        raise OracleError("series_sort_values requires left payload")
+
+    ascending = payload.get("sort_ascending", True)
+    index = [label_from_json(item) for item in left["index"]]
+    values = [scalar_from_json(item) for item in left["values"]]
+    series = pd.Series(values, index=index, name=left.get("name", "series"))
+    out = series.sort_values(ascending=bool(ascending), na_position="last")
+
+    return {
+        "expected_series": {
+            "index": [label_to_json(v) for v in out.index.tolist()],
+            "values": [scalar_to_json(v) for v in out.tolist()],
+        }
+    }
 
 
 def dataframe_from_json(pd, payload: dict[str, Any]):
@@ -1031,6 +1242,98 @@ def op_dataframe_tail(pd, payload: dict[str, Any]) -> dict[str, Any]:
         raise OracleError(f"dataframe_tail tail_n must be an integer: {exc}") from exc
 
     out = frame.tail(n)
+    return {"expected_frame": dataframe_to_json(out)}
+
+
+def op_dataframe_isna(pd, payload: dict[str, Any]) -> dict[str, Any]:
+    frame_payload = payload.get("frame")
+    if frame_payload is None:
+        raise OracleError("dataframe_isna requires frame payload")
+
+    frame = dataframe_from_json(pd, frame_payload)
+    out = frame.isna()
+    return {"expected_frame": dataframe_to_json(out)}
+
+
+def op_dataframe_notna(pd, payload: dict[str, Any]) -> dict[str, Any]:
+    frame_payload = payload.get("frame")
+    if frame_payload is None:
+        raise OracleError("dataframe_notna requires frame payload")
+
+    frame = dataframe_from_json(pd, frame_payload)
+    out = frame.notna()
+    return {"expected_frame": dataframe_to_json(out)}
+
+
+def op_dataframe_isnull(pd, payload: dict[str, Any]) -> dict[str, Any]:
+    frame_payload = payload.get("frame")
+    if frame_payload is None:
+        raise OracleError("dataframe_isnull requires frame payload")
+
+    frame = dataframe_from_json(pd, frame_payload)
+    out = frame.isnull()
+    return {"expected_frame": dataframe_to_json(out)}
+
+
+def op_dataframe_notnull(pd, payload: dict[str, Any]) -> dict[str, Any]:
+    frame_payload = payload.get("frame")
+    if frame_payload is None:
+        raise OracleError("dataframe_notnull requires frame payload")
+
+    frame = dataframe_from_json(pd, frame_payload)
+    out = frame.notnull()
+    return {"expected_frame": dataframe_to_json(out)}
+
+
+def op_dataframe_count(pd, payload: dict[str, Any]) -> dict[str, Any]:
+    frame_payload = payload.get("frame")
+    if frame_payload is None:
+        raise OracleError("dataframe_count requires frame payload")
+
+    frame = dataframe_from_json(pd, frame_payload)
+    out = frame.count(axis=0, numeric_only=False)
+    return {
+        "expected_series": {
+            "index": [label_to_json(v) for v in out.index.tolist()],
+            "values": [scalar_to_json(v) for v in out.tolist()],
+        }
+    }
+
+
+def op_dataframe_fillna(pd, payload: dict[str, Any]) -> dict[str, Any]:
+    frame_payload = payload.get("frame")
+    fill_value_payload = payload.get("fill_value")
+    if frame_payload is None:
+        raise OracleError("dataframe_fillna requires frame payload")
+    if fill_value_payload is None:
+        raise OracleError("dataframe_fillna requires fill_value payload")
+
+    frame = dataframe_from_json(pd, frame_payload)
+    fill_value = scalar_from_json(fill_value_payload)
+    try:
+        out = frame.fillna(fill_value)
+    except Exception as exc:
+        raise OracleError(f"dataframe_fillna failed: {exc}") from exc
+    return {"expected_frame": dataframe_to_json(out)}
+
+
+def op_dataframe_dropna(pd, payload: dict[str, Any]) -> dict[str, Any]:
+    frame_payload = payload.get("frame")
+    if frame_payload is None:
+        raise OracleError("dataframe_dropna requires frame payload")
+
+    frame = dataframe_from_json(pd, frame_payload)
+    out = frame.dropna()
+    return {"expected_frame": dataframe_to_json(out)}
+
+
+def op_dataframe_dropna_columns(pd, payload: dict[str, Any]) -> dict[str, Any]:
+    frame_payload = payload.get("frame")
+    if frame_payload is None:
+        raise OracleError("dataframe_dropna_columns requires frame payload")
+
+    frame = dataframe_from_json(pd, frame_payload)
+    out = frame.dropna(axis=1)
     return {"expected_frame": dataframe_to_json(out)}
 
 
@@ -1442,10 +1745,32 @@ def dispatch(pd, payload: dict[str, Any]) -> dict[str, Any]:
         return op_series_filter(pd, payload)
     if op == "series_head":
         return op_series_head(pd, payload)
+    if op == "series_tail":
+        return op_series_tail(pd, payload)
+    if op == "series_isna":
+        return op_series_isna(pd, payload)
+    if op == "series_notna":
+        return op_series_notna(pd, payload)
+    if op == "series_isnull":
+        return op_series_isnull(pd, payload)
+    if op == "series_notnull":
+        return op_series_notnull(pd, payload)
+    if op == "series_fillna":
+        return op_series_fillna(pd, payload)
+    if op == "series_dropna":
+        return op_series_dropna(pd, payload)
+    if op == "series_count":
+        return op_series_count(pd, payload)
     if op == "series_any":
         return op_series_any(pd, payload)
     if op == "series_all":
         return op_series_all(pd, payload)
+    if op == "series_value_counts":
+        return op_series_value_counts(pd, payload)
+    if op == "series_sort_index":
+        return op_series_sort_index(pd, payload)
+    if op == "series_sort_values":
+        return op_series_sort_values(pd, payload)
     if op == "dataframe_loc":
         return op_dataframe_loc(pd, payload)
     if op == "dataframe_iloc":
@@ -1454,6 +1779,22 @@ def dispatch(pd, payload: dict[str, Any]) -> dict[str, Any]:
         return op_dataframe_head(pd, payload)
     if op in {"dataframe_tail", "data_frame_tail"}:
         return op_dataframe_tail(pd, payload)
+    if op in {"dataframe_isna", "data_frame_isna"}:
+        return op_dataframe_isna(pd, payload)
+    if op in {"dataframe_notna", "data_frame_notna"}:
+        return op_dataframe_notna(pd, payload)
+    if op in {"dataframe_isnull", "data_frame_isnull"}:
+        return op_dataframe_isnull(pd, payload)
+    if op in {"dataframe_notnull", "data_frame_notnull"}:
+        return op_dataframe_notnull(pd, payload)
+    if op in {"dataframe_count", "data_frame_count"}:
+        return op_dataframe_count(pd, payload)
+    if op in {"dataframe_fillna", "data_frame_fillna"}:
+        return op_dataframe_fillna(pd, payload)
+    if op in {"dataframe_dropna", "data_frame_dropna"}:
+        return op_dataframe_dropna(pd, payload)
+    if op in {"dataframe_dropna_columns", "data_frame_dropna_columns"}:
+        return op_dataframe_dropna_columns(pd, payload)
     if op in {"dataframe_sort_index", "data_frame_sort_index"}:
         return op_dataframe_sort_index(pd, payload)
     if op in {"dataframe_sort_values", "data_frame_sort_values"}:

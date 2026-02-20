@@ -456,7 +456,7 @@ fn e2e_scenario4_index_stress() {
 fn e2e_scenario5_evidence_ledger_and_policy() {
     let mut ledger = EvidenceLedger::new();
 
-    // Strict mode rejects duplicate indexes.
+    // Duplicate-index arithmetic should align in both modes.
     let dup_labels = vec![IndexLabel::Int64(1), IndexLabel::Int64(1)];
     let dup_values = vec![Scalar::Int64(10), Scalar::Int64(20)];
     let dup_series = Series::from_values("dup", dup_labels, dup_values).expect("dup series");
@@ -467,19 +467,15 @@ fn e2e_scenario5_evidence_ledger_and_policy() {
 
     let strict = RuntimePolicy::strict();
     let result = dup_series.add_with_policy(&ok_series, &strict, &mut ledger);
-    // Strict mode should reject duplicate indices.
-    assert!(
-        result.is_err(),
-        "strict mode should reject duplicate indices"
-    );
+    assert!(result.is_ok(), "strict mode should align duplicate indices");
 
-    // Hardened mode admits with logged decision.
+    // Hardened mode should produce the same aligned result.
     let hardened = RuntimePolicy::hardened(Some(100_000));
     let mut ledger2 = EvidenceLedger::new();
     let result = dup_series.add_with_policy(&ok_series, &hardened, &mut ledger2);
     assert!(
         result.is_ok(),
-        "hardened mode should admit duplicate indices"
+        "hardened mode should align duplicate indices"
     );
 
     // Non-duplicate operations work in both modes.

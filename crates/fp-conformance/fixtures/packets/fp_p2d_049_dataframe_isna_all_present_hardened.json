@@ -1,0 +1,38 @@
+{
+  "packet_id": "FP-P2D-049",
+  "case_id": "dataframe_isna_all_present_hardened",
+  "mode": "hardened",
+  "operation": "dataframe_isna",
+  "frame": {
+    "index": [
+      { "kind": "utf8", "value": "r1" },
+      { "kind": "utf8", "value": "r2" }
+    ],
+    "columns": {
+      "a": [
+        { "kind": "int64", "value": 10 },
+        { "kind": "int64", "value": 20 }
+      ],
+      "b": [
+        { "kind": "utf8", "value": "k" },
+        { "kind": "utf8", "value": "l" }
+      ]
+    }
+  },
+  "expected_frame": {
+    "index": [
+      { "kind": "utf8", "value": "r1" },
+      { "kind": "utf8", "value": "r2" }
+    ],
+    "columns": {
+      "a": [
+        { "kind": "bool", "value": false },
+        { "kind": "bool", "value": false }
+      ],
+      "b": [
+        { "kind": "bool", "value": false },
+        { "kind": "bool", "value": false }
+      ]
+    }
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "packet_id": "FP-P2D-046",
+  "case_id": "series_fillna_utf8_basic_hardened",
+  "mode": "hardened",
+  "operation": "series_fillna",
+  "left": {
+    "name": "vals",
+    "index": [
+      { "kind": "utf8", "value": "r1" },
+      { "kind": "utf8", "value": "r2" },
+      { "kind": "utf8", "value": "r3" },
+      { "kind": "utf8", "value": "r4" }
+    ],
+    "values": [
+      { "kind": "utf8", "value": "a" },
+      { "kind": "null", "value": "null" },
+      { "kind": "utf8", "value": "b" },
+      { "kind": "null", "value": "na_t" }
+    ]
+  },
+  "fill_value": { "kind": "utf8", "value": "x" },
+  "expected_series": {
+    "index": [
+      { "kind": "utf8", "value": "r1" },
+      { "kind": "utf8", "value": "r2" },
+      { "kind": "utf8", "value": "r3" },
+      { "kind": "utf8", "value": "r4" }
+    ],
+    "values": [
+      { "kind": "utf8", "value": "a" },
+      { "kind": "utf8", "value": "x" },
+      { "kind": "utf8", "value": "b" },
+      { "kind": "utf8", "value": "x" }
+    ]
+  }
+}

@@ -196,8 +196,30 @@ pub enum FixtureOperation {
     // FP-P2C-010: loc/iloc
     SeriesFilter,
     SeriesHead,
+    #[serde(rename = "series_tail", alias = "series_tail_default")]
+    SeriesTail,
     SeriesAny,
     SeriesAll,
+    #[serde(rename = "series_value_counts", alias = "series_value_counts_default")]
+    SeriesValueCounts,
+    #[serde(rename = "series_sort_index", alias = "series_sort_index_default")]
+    SeriesSortIndex,
+    #[serde(rename = "series_sort_values", alias = "series_sort_values_default")]
+    SeriesSortValues,
+    #[serde(rename = "series_isna", alias = "series_isna_default")]
+    SeriesIsNa,
+    #[serde(rename = "series_notna", alias = "series_notna_default")]
+    SeriesNotNa,
+    #[serde(rename = "series_isnull", alias = "series_isnull_default")]
+    SeriesIsNull,
+    #[serde(rename = "series_notnull", alias = "series_notnull_default")]
+    SeriesNotNull,
+    #[serde(rename = "series_fillna", alias = "series_fillna_default")]
+    SeriesFillNa,
+    #[serde(rename = "series_dropna", alias = "series_dropna_default")]
+    SeriesDropNa,
+    #[serde(rename = "series_count", alias = "series_count_default")]
+    SeriesCount,
     SeriesLoc,
     SeriesIloc,
     #[serde(rename = "dataframe_loc", alias = "data_frame_loc")]
@@ -208,6 +230,25 @@ pub enum FixtureOperation {
     DataFrameHead,
     #[serde(rename = "dataframe_tail", alias = "data_frame_tail")]
     DataFrameTail,
+    #[serde(rename = "dataframe_isna", alias = "data_frame_isna")]
+    DataFrameIsNa,
+    #[serde(rename = "dataframe_notna", alias = "data_frame_notna")]
+    DataFrameNotNa,
+    #[serde(rename = "dataframe_isnull", alias = "data_frame_isnull")]
+    DataFrameIsNull,
+    #[serde(rename = "dataframe_notnull", alias = "data_frame_notnull")]
+    DataFrameNotNull,
+    #[serde(rename = "dataframe_count", alias = "data_frame_count")]
+    DataFrameCount,
+    #[serde(rename = "dataframe_fillna", alias = "data_frame_fillna")]
+    DataFrameFillNa,
+    #[serde(rename = "dataframe_dropna", alias = "data_frame_dropna")]
+    DataFrameDropNa,
+    #[serde(
+        rename = "dataframe_dropna_columns",
+        alias = "data_frame_dropna_columns"
+    )]
+    DataFrameDropNaColumns,
     // FP-P2D-040: DataFrame ordering parity matrix
     #[serde(rename = "dataframe_sort_index", alias = "data_frame_sort_index")]
     DataFrameSortIndex,
@@ -273,14 +314,33 @@ impl FixtureOperation {
             Self::ColumnDtypeCheck => "column_dtype_check",
             Self::SeriesFilter => "series_filter",
             Self::SeriesHead => "series_head",
+            Self::SeriesTail => "series_tail",
             Self::SeriesAny => "series_any",
             Self::SeriesAll => "series_all",
+            Self::SeriesValueCounts => "series_value_counts",
+            Self::SeriesSortIndex => "series_sort_index",
+            Self::SeriesSortValues => "series_sort_values",
+            Self::SeriesIsNa => "series_isna",
+            Self::SeriesNotNa => "series_notna",
+            Self::SeriesIsNull => "series_isnull",
+            Self::SeriesNotNull => "series_notnull",
+            Self::SeriesFillNa => "series_fillna",
+            Self::SeriesDropNa => "series_dropna",
+            Self::SeriesCount => "series_count",
             Self::SeriesLoc => "series_loc",
             Self::SeriesIloc => "series_iloc",
             Self::DataFrameLoc => "dataframe_loc",
             Self::DataFrameIloc => "dataframe_iloc",
             Self::DataFrameHead => "dataframe_head",
             Self::DataFrameTail => "dataframe_tail",
+            Self::DataFrameIsNa => "dataframe_isna",
+            Self::DataFrameNotNa => "dataframe_notna",
+            Self::DataFrameIsNull => "dataframe_isnull",
+            Self::DataFrameNotNull => "dataframe_notnull",
+            Self::DataFrameCount => "dataframe_count",
+            Self::DataFrameFillNa => "dataframe_fillna",
+            Self::DataFrameDropNa => "dataframe_dropna",
+            Self::DataFrameDropNaColumns => "dataframe_dropna_columns",
             Self::DataFrameSortIndex => "dataframe_sort_index",
             Self::DataFrameSortValues => "dataframe_sort_values",
             Self::DataFrameMerge => "dataframe_merge",
@@ -668,7 +728,8 @@ fn compat_contract_rows_for_operation(operation: FixtureOperation) -> &'static [
         | FixtureOperation::GroupByLast
         | FixtureOperation::GroupByStd
         | FixtureOperation::GroupByVar
-        | FixtureOperation::GroupByMedian => &["CC-007"],
+        | FixtureOperation::GroupByMedian
+        | FixtureOperation::SeriesValueCounts => &["CC-007"],
         FixtureOperation::IndexAlignUnion
         | FixtureOperation::IndexHasDuplicates
         | FixtureOperation::IndexFirstPositions => &["CC-003"],
@@ -678,14 +739,33 @@ fn compat_contract_rows_for_operation(operation: FixtureOperation) -> &'static [
         | FixtureOperation::NanMax
         | FixtureOperation::NanStd
         | FixtureOperation::NanVar
-        | FixtureOperation::NanCount => &["CC-005"],
-        FixtureOperation::FillNa | FixtureOperation::DropNa => &["CC-002", "CC-005"],
+        | FixtureOperation::NanCount
+        | FixtureOperation::SeriesCount
+        | FixtureOperation::DataFrameCount => &["CC-005"],
+        FixtureOperation::FillNa
+        | FixtureOperation::DropNa
+        | FixtureOperation::SeriesIsNa
+        | FixtureOperation::SeriesNotNa
+        | FixtureOperation::SeriesIsNull
+        | FixtureOperation::SeriesNotNull
+        | FixtureOperation::SeriesFillNa
+        | FixtureOperation::SeriesDropNa
+        | FixtureOperation::DataFrameIsNa
+        | FixtureOperation::DataFrameNotNa
+        | FixtureOperation::DataFrameIsNull
+        | FixtureOperation::DataFrameNotNull
+        | FixtureOperation::DataFrameFillNa
+        | FixtureOperation::DataFrameDropNa
+        | FixtureOperation::DataFrameDropNaColumns => &["CC-002", "CC-005"],
         FixtureOperation::CsvRoundTrip => &["CC-006"],
         FixtureOperation::ColumnDtypeCheck => &["CC-001"],
         FixtureOperation::SeriesFilter
         | FixtureOperation::SeriesHead
+        | FixtureOperation::SeriesTail
         | FixtureOperation::SeriesAny
         | FixtureOperation::SeriesAll
+        | FixtureOperation::SeriesSortIndex
+        | FixtureOperation::SeriesSortValues
         | FixtureOperation::SeriesLoc
         | FixtureOperation::SeriesIloc
         | FixtureOperation::DataFrameLoc
@@ -3498,6 +3578,334 @@ fn run_fixture_operation(
             };
             compare_series_expected(&actual, &expected)
         }
+        FixtureOperation::SeriesTail => {
+            let left = require_left_series(fixture)?;
+            let n = fixture
+                .tail_n
+                .ok_or_else(|| "tail_n is required for series_tail".to_owned())?;
+            let series = build_series(left)?;
+            let actual = series.tail(n).map_err(|err| err.to_string());
+            match expected {
+                ResolvedExpected::Series(series) => compare_series_expected(&actual?, &series),
+                ResolvedExpected::ErrorContains(substr) => match actual {
+                    Err(message) if message.contains(&substr) => Ok(()),
+                    Err(message) => Err(format!(
+                        "expected series_tail error containing '{substr}', got '{message}'"
+                    )),
+                    Ok(_) => Err(format!(
+                        "expected series_tail to fail with error containing '{substr}'"
+                    )),
+                },
+                ResolvedExpected::ErrorAny => {
+                    if actual.is_err() {
+                        Ok(())
+                    } else {
+                        Err("expected series_tail to fail but operation succeeded".to_owned())
+                    }
+                }
+                _ => {
+                    Err("expected_series or expected_error is required for series_tail".to_owned())
+                }
+            }
+        }
+        FixtureOperation::SeriesValueCounts => {
+            let left = require_left_series(fixture)?;
+            let series = build_series(left)?;
+            let actual = series.value_counts().map_err(|err| err.to_string());
+            match expected {
+                ResolvedExpected::Series(series) => compare_series_expected(&actual?, &series),
+                ResolvedExpected::ErrorContains(substr) => match actual {
+                    Err(message) if message.contains(&substr) => Ok(()),
+                    Err(message) => Err(format!(
+                        "expected series_value_counts error containing '{substr}', got '{message}'"
+                    )),
+                    Ok(_) => Err(format!(
+                        "expected series_value_counts to fail with error containing '{substr}'"
+                    )),
+                },
+                ResolvedExpected::ErrorAny => {
+                    if actual.is_err() {
+                        Ok(())
+                    } else {
+                        Err(
+                            "expected series_value_counts to fail but operation succeeded"
+                                .to_owned(),
+                        )
+                    }
+                }
+                _ => Err(
+                    "expected_series or expected_error is required for series_value_counts"
+                        .to_owned(),
+                ),
+            }
+        }
+        FixtureOperation::SeriesSortIndex => {
+            let left = require_left_series(fixture)?;
+            let series = build_series(left)?;
+            let actual = series
+                .sort_index(resolve_sort_ascending(fixture))
+                .map_err(|err| err.to_string());
+            match expected {
+                ResolvedExpected::Series(series) => compare_series_expected(&actual?, &series),
+                ResolvedExpected::ErrorContains(substr) => match actual {
+                    Err(message) if message.contains(&substr) => Ok(()),
+                    Err(message) => Err(format!(
+                        "expected series_sort_index error containing '{substr}', got '{message}'"
+                    )),
+                    Ok(_) => Err(format!(
+                        "expected series_sort_index to fail with error containing '{substr}'"
+                    )),
+                },
+                ResolvedExpected::ErrorAny => {
+                    if actual.is_err() {
+                        Ok(())
+                    } else {
+                        Err("expected series_sort_index to fail but operation succeeded".to_owned())
+                    }
+                }
+                _ => Err(
+                    "expected_series or expected_error is required for series_sort_index"
+                        .to_owned(),
+                ),
+            }
+        }
+        FixtureOperation::SeriesSortValues => {
+            let left = require_left_series(fixture)?;
+            let series = build_series(left)?;
+            let actual = series
+                .sort_values(resolve_sort_ascending(fixture))
+                .map_err(|err| err.to_string());
+            match expected {
+                ResolvedExpected::Series(series) => compare_series_expected(&actual?, &series),
+                ResolvedExpected::ErrorContains(substr) => match actual {
+                    Err(message) if message.contains(&substr) => Ok(()),
+                    Err(message) => Err(format!(
+                        "expected series_sort_values error containing '{substr}', got '{message}'"
+                    )),
+                    Ok(_) => Err(format!(
+                        "expected series_sort_values to fail with error containing '{substr}'"
+                    )),
+                },
+                ResolvedExpected::ErrorAny => {
+                    if actual.is_err() {
+                        Ok(())
+                    } else {
+                        Err(
+                            "expected series_sort_values to fail but operation succeeded"
+                                .to_owned(),
+                        )
+                    }
+                }
+                _ => Err(
+                    "expected_series or expected_error is required for series_sort_values"
+                        .to_owned(),
+                ),
+            }
+        }
+        FixtureOperation::SeriesIsNa => {
+            let left = require_left_series(fixture)?;
+            let series = build_series(left)?;
+            let actual = series.isna().map_err(|err| err.to_string());
+            match expected {
+                ResolvedExpected::Series(series) => compare_series_expected(&actual?, &series),
+                ResolvedExpected::ErrorContains(substr) => match actual {
+                    Err(message) if message.contains(&substr) => Ok(()),
+                    Err(message) => Err(format!(
+                        "expected series_isna error containing '{substr}', got '{message}'"
+                    )),
+                    Ok(_) => Err(format!(
+                        "expected series_isna to fail with error containing '{substr}'"
+                    )),
+                },
+                ResolvedExpected::ErrorAny => {
+                    if actual.is_err() {
+                        Ok(())
+                    } else {
+                        Err("expected series_isna to fail but operation succeeded".to_owned())
+                    }
+                }
+                _ => {
+                    Err("expected_series or expected_error is required for series_isna".to_owned())
+                }
+            }
+        }
+        FixtureOperation::SeriesNotNa => {
+            let left = require_left_series(fixture)?;
+            let series = build_series(left)?;
+            let actual = series.notna().map_err(|err| err.to_string());
+            match expected {
+                ResolvedExpected::Series(series) => compare_series_expected(&actual?, &series),
+                ResolvedExpected::ErrorContains(substr) => match actual {
+                    Err(message) if message.contains(&substr) => Ok(()),
+                    Err(message) => Err(format!(
+                        "expected series_notna error containing '{substr}', got '{message}'"
+                    )),
+                    Ok(_) => Err(format!(
+                        "expected series_notna to fail with error containing '{substr}'"
+                    )),
+                },
+                ResolvedExpected::ErrorAny => {
+                    if actual.is_err() {
+                        Ok(())
+                    } else {
+                        Err("expected series_notna to fail but operation succeeded".to_owned())
+                    }
+                }
+                _ => {
+                    Err("expected_series or expected_error is required for series_notna".to_owned())
+                }
+            }
+        }
+        FixtureOperation::SeriesIsNull => {
+            let left = require_left_series(fixture)?;
+            let series = build_series(left)?;
+            let actual = series.isnull().map_err(|err| err.to_string());
+            match expected {
+                ResolvedExpected::Series(series) => compare_series_expected(&actual?, &series),
+                ResolvedExpected::ErrorContains(substr) => match actual {
+                    Err(message) if message.contains(&substr) => Ok(()),
+                    Err(message) => Err(format!(
+                        "expected series_isnull error containing '{substr}', got '{message}'"
+                    )),
+                    Ok(_) => Err(format!(
+                        "expected series_isnull to fail with error containing '{substr}'"
+                    )),
+                },
+                ResolvedExpected::ErrorAny => {
+                    if actual.is_err() {
+                        Ok(())
+                    } else {
+                        Err("expected series_isnull to fail but operation succeeded".to_owned())
+                    }
+                }
+                _ => Err(
+                    "expected_series or expected_error is required for series_isnull".to_owned(),
+                ),
+            }
+        }
+        FixtureOperation::SeriesNotNull => {
+            let left = require_left_series(fixture)?;
+            let series = build_series(left)?;
+            let actual = series.notnull().map_err(|err| err.to_string());
+            match expected {
+                ResolvedExpected::Series(series) => compare_series_expected(&actual?, &series),
+                ResolvedExpected::ErrorContains(substr) => match actual {
+                    Err(message) if message.contains(&substr) => Ok(()),
+                    Err(message) => Err(format!(
+                        "expected series_notnull error containing '{substr}', got '{message}'"
+                    )),
+                    Ok(_) => Err(format!(
+                        "expected series_notnull to fail with error containing '{substr}'"
+                    )),
+                },
+                ResolvedExpected::ErrorAny => {
+                    if actual.is_err() {
+                        Ok(())
+                    } else {
+                        Err("expected series_notnull to fail but operation succeeded".to_owned())
+                    }
+                }
+                _ => Err(
+                    "expected_series or expected_error is required for series_notnull".to_owned(),
+                ),
+            }
+        }
+        FixtureOperation::SeriesFillNa => {
+            let left = require_left_series(fixture)?;
+            let series = build_series(left)?;
+            let fill_value = fixture
+                .fill_value
+                .as_ref()
+                .ok_or_else(|| "fill_value is required for series_fillna".to_owned())?;
+            let actual = series.fillna(fill_value).map_err(|err| err.to_string());
+            match expected {
+                ResolvedExpected::Series(series) => compare_series_expected(&actual?, &series),
+                ResolvedExpected::ErrorContains(substr) => match actual {
+                    Err(message) if message.contains(&substr) => Ok(()),
+                    Err(message) => Err(format!(
+                        "expected series_fillna error containing '{substr}', got '{message}'"
+                    )),
+                    Ok(_) => Err(format!(
+                        "expected series_fillna to fail with error containing '{substr}'"
+                    )),
+                },
+                ResolvedExpected::ErrorAny => {
+                    if actual.is_err() {
+                        Ok(())
+                    } else {
+                        Err("expected series_fillna to fail but operation succeeded".to_owned())
+                    }
+                }
+                _ => Err(
+                    "expected_series or expected_error is required for series_fillna".to_owned(),
+                ),
+            }
+        }
+        FixtureOperation::SeriesDropNa => {
+            let left = require_left_series(fixture)?;
+            let series = build_series(left)?;
+            let actual = series.dropna().map_err(|err| err.to_string());
+            match expected {
+                ResolvedExpected::Series(series) => compare_series_expected(&actual?, &series),
+                ResolvedExpected::ErrorContains(substr) => match actual {
+                    Err(message) if message.contains(&substr) => Ok(()),
+                    Err(message) => Err(format!(
+                        "expected series_dropna error containing '{substr}', got '{message}'"
+                    )),
+                    Ok(_) => Err(format!(
+                        "expected series_dropna to fail with error containing '{substr}'"
+                    )),
+                },
+                ResolvedExpected::ErrorAny => {
+                    if actual.is_err() {
+                        Ok(())
+                    } else {
+                        Err("expected series_dropna to fail but operation succeeded".to_owned())
+                    }
+                }
+                _ => Err(
+                    "expected_series or expected_error is required for series_dropna".to_owned(),
+                ),
+            }
+        }
+        FixtureOperation::SeriesCount => {
+            let left = require_left_series(fixture)?;
+            let series = build_series(left)?;
+            let actual = Scalar::Int64(series.count() as i64);
+            match expected {
+                ResolvedExpected::Scalar(scalar) => {
+                    compare_scalar(&actual, &scalar, fixture.operation.operation_name())
+                }
+                _ => Err("expected_scalar is required for series_count".to_owned()),
+            }
+        }
+        FixtureOperation::DataFrameCount => {
+            let frame = build_dataframe(require_frame(fixture)?)
+                .map_err(|err| format!("frame build failed: {err}"))?;
+            let actual = frame.count().map_err(|err| err.to_string());
+            match expected {
+                ResolvedExpected::Series(series) => compare_series_expected(&actual?, &series),
+                ResolvedExpected::ErrorContains(substr) => match actual {
+                    Err(message) if message.contains(&substr) => Ok(()),
+                    Err(message) => Err(format!(
+                        "expected dataframe_count error containing '{substr}', got '{message}'"
+                    )),
+                    Ok(_) => Err(format!(
+                        "expected dataframe_count to fail with error containing '{substr}'"
+                    )),
+                },
+                ResolvedExpected::ErrorAny => {
+                    if actual.is_err() {
+                        Ok(())
+                    } else {
+                        Err("expected dataframe_count to fail but operation succeeded".to_owned())
+                    }
+                }
+                _ => Err(
+                    "expected_series or expected_error is required for dataframe_count".to_owned(),
+                ),
+            }
+        }
         FixtureOperation::SeriesAny => {
             let left = require_left_series(fixture)?;
             let series = build_series(left)?;
@@ -3743,6 +4151,13 @@ fn run_fixture_operation(
         FixtureOperation::DataFrameMerge
         | FixtureOperation::DataFrameMergeIndex
         | FixtureOperation::DataFrameConcat
+        | FixtureOperation::DataFrameIsNa
+        | FixtureOperation::DataFrameNotNa
+        | FixtureOperation::DataFrameIsNull
+        | FixtureOperation::DataFrameNotNull
+        | FixtureOperation::DataFrameFillNa
+        | FixtureOperation::DataFrameDropNa
+        | FixtureOperation::DataFrameDropNaColumns
         | FixtureOperation::DataFrameSortIndex
         | FixtureOperation::DataFrameSortValues => {
             let actual = execute_dataframe_fixture_operation(fixture);
@@ -3903,8 +4318,19 @@ fn fixture_expected(fixture: &PacketFixture) -> Result<ResolvedExpected, Harness
         | FixtureOperation::DropNa
         | FixtureOperation::SeriesFilter
         | FixtureOperation::SeriesHead
+        | FixtureOperation::SeriesTail
+        | FixtureOperation::SeriesValueCounts
+        | FixtureOperation::SeriesSortIndex
+        | FixtureOperation::SeriesSortValues
+        | FixtureOperation::SeriesIsNa
+        | FixtureOperation::SeriesNotNa
+        | FixtureOperation::SeriesIsNull
+        | FixtureOperation::SeriesNotNull
+        | FixtureOperation::SeriesFillNa
+        | FixtureOperation::SeriesDropNa
         | FixtureOperation::SeriesLoc
         | FixtureOperation::SeriesIloc
+        | FixtureOperation::DataFrameCount
         | FixtureOperation::GroupByMean
         | FixtureOperation::GroupByCount
         | FixtureOperation::GroupByMin
@@ -3934,6 +4360,13 @@ fn fixture_expected(fixture: &PacketFixture) -> Result<ResolvedExpected, Harness
         | FixtureOperation::DataFrameConstructorScalar
         | FixtureOperation::DataFrameConstructorDictOfSeries
         | FixtureOperation::DataFrameConstructorListLike
+        | FixtureOperation::DataFrameIsNa
+        | FixtureOperation::DataFrameNotNa
+        | FixtureOperation::DataFrameIsNull
+        | FixtureOperation::DataFrameNotNull
+        | FixtureOperation::DataFrameFillNa
+        | FixtureOperation::DataFrameDropNa
+        | FixtureOperation::DataFrameDropNaColumns
         | FixtureOperation::DataFrameMerge
         | FixtureOperation::DataFrameMergeIndex
         | FixtureOperation::DataFrameConcat
@@ -3954,7 +4387,8 @@ fn fixture_expected(fixture: &PacketFixture) -> Result<ResolvedExpected, Harness
         | FixtureOperation::NanMax
         | FixtureOperation::NanStd
         | FixtureOperation::NanVar
-        | FixtureOperation::NanCount => fixture
+        | FixtureOperation::NanCount
+        | FixtureOperation::SeriesCount => fixture
             .expected_scalar
             .clone()
             .map(ResolvedExpected::Scalar)
@@ -4143,8 +4577,19 @@ fn capture_live_oracle_expected(
         | FixtureOperation::DropNa
         | FixtureOperation::SeriesFilter
         | FixtureOperation::SeriesHead
+        | FixtureOperation::SeriesTail
+        | FixtureOperation::SeriesValueCounts
+        | FixtureOperation::SeriesSortIndex
+        | FixtureOperation::SeriesSortValues
+        | FixtureOperation::SeriesIsNa
+        | FixtureOperation::SeriesNotNa
+        | FixtureOperation::SeriesIsNull
+        | FixtureOperation::SeriesNotNull
+        | FixtureOperation::SeriesFillNa
+        | FixtureOperation::SeriesDropNa
         | FixtureOperation::SeriesLoc
         | FixtureOperation::SeriesIloc
+        | FixtureOperation::DataFrameCount
         | FixtureOperation::GroupByMean
         | FixtureOperation::GroupByCount
         | FixtureOperation::GroupByMin
@@ -4170,6 +4615,13 @@ fn capture_live_oracle_expected(
         | FixtureOperation::DataFrameConstructorScalar
         | FixtureOperation::DataFrameConstructorDictOfSeries
         | FixtureOperation::DataFrameConstructorListLike
+        | FixtureOperation::DataFrameIsNa
+        | FixtureOperation::DataFrameNotNa
+        | FixtureOperation::DataFrameIsNull
+        | FixtureOperation::DataFrameNotNull
+        | FixtureOperation::DataFrameFillNa
+        | FixtureOperation::DataFrameDropNa
+        | FixtureOperation::DataFrameDropNaColumns
         | FixtureOperation::DataFrameMerge
         | FixtureOperation::DataFrameMergeIndex
         | FixtureOperation::DataFrameConcat
@@ -4184,7 +4636,8 @@ fn capture_live_oracle_expected(
         | FixtureOperation::NanMax
         | FixtureOperation::NanStd
         | FixtureOperation::NanVar
-        | FixtureOperation::NanCount => response
+        | FixtureOperation::NanCount
+        | FixtureOperation::SeriesCount => response
             .expected_scalar
             .map(ResolvedExpected::Scalar)
             .ok_or_else(|| {
@@ -4896,6 +5349,45 @@ fn execute_dataframe_fixture_operation(fixture: &PacketFixture) -> Result<DataFr
                     resolve_sort_ascending(fixture),
                 )
                 .map_err(|err| err.to_string())
+        }
+        FixtureOperation::DataFrameIsNa => {
+            let frame = build_dataframe(require_frame(fixture)?)
+                .map_err(|err| format!("frame build failed: {err}"))?;
+            frame.isna().map_err(|err| err.to_string())
+        }
+        FixtureOperation::DataFrameNotNa => {
+            let frame = build_dataframe(require_frame(fixture)?)
+                .map_err(|err| format!("frame build failed: {err}"))?;
+            frame.notna().map_err(|err| err.to_string())
+        }
+        FixtureOperation::DataFrameIsNull => {
+            let frame = build_dataframe(require_frame(fixture)?)
+                .map_err(|err| format!("frame build failed: {err}"))?;
+            frame.isnull().map_err(|err| err.to_string())
+        }
+        FixtureOperation::DataFrameNotNull => {
+            let frame = build_dataframe(require_frame(fixture)?)
+                .map_err(|err| format!("frame build failed: {err}"))?;
+            frame.notnull().map_err(|err| err.to_string())
+        }
+        FixtureOperation::DataFrameFillNa => {
+            let frame = build_dataframe(require_frame(fixture)?)
+                .map_err(|err| format!("frame build failed: {err}"))?;
+            let fill_value = fixture
+                .fill_value
+                .as_ref()
+                .ok_or_else(|| "fill_value is required for dataframe_fillna".to_owned())?;
+            frame.fillna(fill_value).map_err(|err| err.to_string())
+        }
+        FixtureOperation::DataFrameDropNa => {
+            let frame = build_dataframe(require_frame(fixture)?)
+                .map_err(|err| format!("frame build failed: {err}"))?;
+            frame.dropna().map_err(|err| err.to_string())
+        }
+        FixtureOperation::DataFrameDropNaColumns => {
+            let frame = build_dataframe(require_frame(fixture)?)
+                .map_err(|err| format!("frame build failed: {err}"))?;
+            frame.dropna_columns().map_err(|err| err.to_string())
         }
         _ => Err(format!(
             "unsupported dataframe operation for fixture execution: {:?}",
@@ -6035,6 +6527,425 @@ fn execute_and_compare_differential(
             };
             Ok(diff_series(&actual, &expected))
         }
+        FixtureOperation::SeriesTail => {
+            let left = require_left_series(fixture)?;
+            let n = fixture
+                .tail_n
+                .ok_or_else(|| "tail_n is required for series_tail".to_owned())?;
+            let series = build_series(left)?;
+            let actual = series.tail(n).map_err(|err| err.to_string());
+            match expected {
+                ResolvedExpected::Series(s) => Ok(diff_series(&actual?, &s)),
+                ResolvedExpected::ErrorContains(substr) => Ok(match actual {
+                    Err(message) if message.contains(&substr) => Vec::new(),
+                    Err(message) => vec![make_drift_record(
+                        ComparisonCategory::Value,
+                        DriftLevel::Critical,
+                        "series_tail.error",
+                        format!(
+                            "expected series_tail error containing '{substr}', got '{message}'"
+                        ),
+                    )],
+                    Ok(_) => vec![make_drift_record(
+                        ComparisonCategory::Value,
+                        DriftLevel::Critical,
+                        "series_tail.error",
+                        "expected series_tail to fail but operation succeeded".to_owned(),
+                    )],
+                }),
+                ResolvedExpected::ErrorAny => Ok(match actual {
+                    Err(_) => Vec::new(),
+                    Ok(_) => vec![make_drift_record(
+                        ComparisonCategory::Value,
+                        DriftLevel::Critical,
+                        "series_tail.error",
+                        "expected series_tail to fail but operation succeeded".to_owned(),
+                    )],
+                }),
+                _ => Err("expected_series or expected_error required for series_tail".to_owned()),
+            }
+        }
+        FixtureOperation::SeriesValueCounts => {
+            let left = require_left_series(fixture)?;
+            let series = build_series(left)?;
+            let actual = series.value_counts().map_err(|err| err.to_string());
+            match expected {
+                ResolvedExpected::Series(s) => Ok(diff_series(&actual?, &s)),
+                ResolvedExpected::ErrorContains(substr) => Ok(match actual {
+                    Err(message) if message.contains(&substr) => Vec::new(),
+                    Err(message) => vec![make_drift_record(
+                        ComparisonCategory::Value,
+                        DriftLevel::Critical,
+                        "series_value_counts.error",
+                        format!(
+                            "expected series_value_counts error containing '{substr}', got '{message}'"
+                        ),
+                    )],
+                    Ok(_) => vec![make_drift_record(
+                        ComparisonCategory::Value,
+                        DriftLevel::Critical,
+                        "series_value_counts.error",
+                        "expected series_value_counts to fail but operation succeeded".to_owned(),
+                    )],
+                }),
+                ResolvedExpected::ErrorAny => Ok(match actual {
+                    Err(_) => Vec::new(),
+                    Ok(_) => vec![make_drift_record(
+                        ComparisonCategory::Value,
+                        DriftLevel::Critical,
+                        "series_value_counts.error",
+                        "expected series_value_counts to fail but operation succeeded".to_owned(),
+                    )],
+                }),
+                _ => Err(
+                    "expected_series or expected_error required for series_value_counts".to_owned(),
+                ),
+            }
+        }
+        FixtureOperation::SeriesSortIndex => {
+            let left = require_left_series(fixture)?;
+            let series = build_series(left)?;
+            let actual = series
+                .sort_index(resolve_sort_ascending(fixture))
+                .map_err(|err| err.to_string());
+            match expected {
+                ResolvedExpected::Series(s) => Ok(diff_series(&actual?, &s)),
+                ResolvedExpected::ErrorContains(substr) => Ok(match actual {
+                    Err(message) if message.contains(&substr) => Vec::new(),
+                    Err(message) => vec![make_drift_record(
+                        ComparisonCategory::Value,
+                        DriftLevel::Critical,
+                        "series_sort_index.error",
+                        format!(
+                            "expected series_sort_index error containing '{substr}', got '{message}'"
+                        ),
+                    )],
+                    Ok(_) => vec![make_drift_record(
+                        ComparisonCategory::Value,
+                        DriftLevel::Critical,
+                        "series_sort_index.error",
+                        "expected series_sort_index to fail but operation succeeded".to_owned(),
+                    )],
+                }),
+                ResolvedExpected::ErrorAny => Ok(match actual {
+                    Err(_) => Vec::new(),
+                    Ok(_) => vec![make_drift_record(
+                        ComparisonCategory::Value,
+                        DriftLevel::Critical,
+                        "series_sort_index.error",
+                        "expected series_sort_index to fail but operation succeeded".to_owned(),
+                    )],
+                }),
+                _ => Err(
+                    "expected_series or expected_error required for series_sort_index".to_owned(),
+                ),
+            }
+        }
+        FixtureOperation::SeriesSortValues => {
+            let left = require_left_series(fixture)?;
+            let series = build_series(left)?;
+            let actual = series
+                .sort_values(resolve_sort_ascending(fixture))
+                .map_err(|err| err.to_string());
+            match expected {
+                ResolvedExpected::Series(s) => Ok(diff_series(&actual?, &s)),
+                ResolvedExpected::ErrorContains(substr) => Ok(match actual {
+                    Err(message) if message.contains(&substr) => Vec::new(),
+                    Err(message) => vec![make_drift_record(
+                        ComparisonCategory::Value,
+                        DriftLevel::Critical,
+                        "series_sort_values.error",
+                        format!(
+                            "expected series_sort_values error containing '{substr}', got '{message}'"
+                        ),
+                    )],
+                    Ok(_) => vec![make_drift_record(
+                        ComparisonCategory::Value,
+                        DriftLevel::Critical,
+                        "series_sort_values.error",
+                        "expected series_sort_values to fail but operation succeeded".to_owned(),
+                    )],
+                }),
+                ResolvedExpected::ErrorAny => Ok(match actual {
+                    Err(_) => Vec::new(),
+                    Ok(_) => vec![make_drift_record(
+                        ComparisonCategory::Value,
+                        DriftLevel::Critical,
+                        "series_sort_values.error",
+                        "expected series_sort_values to fail but operation succeeded".to_owned(),
+                    )],
+                }),
+                _ => Err(
+                    "expected_series or expected_error required for series_sort_values".to_owned(),
+                ),
+            }
+        }
+        FixtureOperation::SeriesIsNa => {
+            let left = require_left_series(fixture)?;
+            let series = build_series(left)?;
+            let actual = series.isna().map_err(|err| err.to_string());
+            match expected {
+                ResolvedExpected::Series(s) => Ok(diff_series(&actual?, &s)),
+                ResolvedExpected::ErrorContains(substr) => Ok(match actual {
+                    Err(message) if message.contains(&substr) => Vec::new(),
+                    Err(message) => vec![make_drift_record(
+                        ComparisonCategory::Value,
+                        DriftLevel::Critical,
+                        "series_isna.error",
+                        format!(
+                            "expected series_isna error containing '{substr}', got '{message}'"
+                        ),
+                    )],
+                    Ok(_) => vec![make_drift_record(
+                        ComparisonCategory::Value,
+                        DriftLevel::Critical,
+                        "series_isna.error",
+                        "expected series_isna to fail but operation succeeded".to_owned(),
+                    )],
+                }),
+                ResolvedExpected::ErrorAny => Ok(match actual {
+                    Err(_) => Vec::new(),
+                    Ok(_) => vec![make_drift_record(
+                        ComparisonCategory::Value,
+                        DriftLevel::Critical,
+                        "series_isna.error",
+                        "expected series_isna to fail but operation succeeded".to_owned(),
+                    )],
+                }),
+                _ => Err("expected_series or expected_error required for series_isna".to_owned()),
+            }
+        }
+        FixtureOperation::SeriesNotNa => {
+            let left = require_left_series(fixture)?;
+            let series = build_series(left)?;
+            let actual = series.notna().map_err(|err| err.to_string());
+            match expected {
+                ResolvedExpected::Series(s) => Ok(diff_series(&actual?, &s)),
+                ResolvedExpected::ErrorContains(substr) => Ok(match actual {
+                    Err(message) if message.contains(&substr) => Vec::new(),
+                    Err(message) => vec![make_drift_record(
+                        ComparisonCategory::Value,
+                        DriftLevel::Critical,
+                        "series_notna.error",
+                        format!(
+                            "expected series_notna error containing '{substr}', got '{message}'"
+                        ),
+                    )],
+                    Ok(_) => vec![make_drift_record(
+                        ComparisonCategory::Value,
+                        DriftLevel::Critical,
+                        "series_notna.error",
+                        "expected series_notna to fail but operation succeeded".to_owned(),
+                    )],
+                }),
+                ResolvedExpected::ErrorAny => Ok(match actual {
+                    Err(_) => Vec::new(),
+                    Ok(_) => vec![make_drift_record(
+                        ComparisonCategory::Value,
+                        DriftLevel::Critical,
+                        "series_notna.error",
+                        "expected series_notna to fail but operation succeeded".to_owned(),
+                    )],
+                }),
+                _ => Err("expected_series or expected_error required for series_notna".to_owned()),
+            }
+        }
+        FixtureOperation::SeriesIsNull => {
+            let left = require_left_series(fixture)?;
+            let series = build_series(left)?;
+            let actual = series.isnull().map_err(|err| err.to_string());
+            match expected {
+                ResolvedExpected::Series(s) => Ok(diff_series(&actual?, &s)),
+                ResolvedExpected::ErrorContains(substr) => Ok(match actual {
+                    Err(message) if message.contains(&substr) => Vec::new(),
+                    Err(message) => vec![make_drift_record(
+                        ComparisonCategory::Value,
+                        DriftLevel::Critical,
+                        "series_isnull.error",
+                        format!(
+                            "expected series_isnull error containing '{substr}', got '{message}'"
+                        ),
+                    )],
+                    Ok(_) => vec![make_drift_record(
+                        ComparisonCategory::Value,
+                        DriftLevel::Critical,
+                        "series_isnull.error",
+                        "expected series_isnull to fail but operation succeeded".to_owned(),
+                    )],
+                }),
+                ResolvedExpected::ErrorAny => Ok(match actual {
+                    Err(_) => Vec::new(),
+                    Ok(_) => vec![make_drift_record(
+                        ComparisonCategory::Value,
+                        DriftLevel::Critical,
+                        "series_isnull.error",
+                        "expected series_isnull to fail but operation succeeded".to_owned(),
+                    )],
+                }),
+                _ => Err("expected_series or expected_error required for series_isnull".to_owned()),
+            }
+        }
+        FixtureOperation::SeriesNotNull => {
+            let left = require_left_series(fixture)?;
+            let series = build_series(left)?;
+            let actual = series.notnull().map_err(|err| err.to_string());
+            match expected {
+                ResolvedExpected::Series(s) => Ok(diff_series(&actual?, &s)),
+                ResolvedExpected::ErrorContains(substr) => Ok(match actual {
+                    Err(message) if message.contains(&substr) => Vec::new(),
+                    Err(message) => vec![make_drift_record(
+                        ComparisonCategory::Value,
+                        DriftLevel::Critical,
+                        "series_notnull.error",
+                        format!(
+                            "expected series_notnull error containing '{substr}', got '{message}'"
+                        ),
+                    )],
+                    Ok(_) => vec![make_drift_record(
+                        ComparisonCategory::Value,
+                        DriftLevel::Critical,
+                        "series_notnull.error",
+                        "expected series_notnull to fail but operation succeeded".to_owned(),
+                    )],
+                }),
+                ResolvedExpected::ErrorAny => Ok(match actual {
+                    Err(_) => Vec::new(),
+                    Ok(_) => vec![make_drift_record(
+                        ComparisonCategory::Value,
+                        DriftLevel::Critical,
+                        "series_notnull.error",
+                        "expected series_notnull to fail but operation succeeded".to_owned(),
+                    )],
+                }),
+                _ => {
+                    Err("expected_series or expected_error required for series_notnull".to_owned())
+                }
+            }
+        }
+        FixtureOperation::SeriesFillNa => {
+            let left = require_left_series(fixture)?;
+            let series = build_series(left)?;
+            let fill_value = fixture
+                .fill_value
+                .as_ref()
+                .ok_or_else(|| "fill_value is required for series_fillna".to_owned())?;
+            let actual = series.fillna(fill_value).map_err(|err| err.to_string());
+            match expected {
+                ResolvedExpected::Series(s) => Ok(diff_series(&actual?, &s)),
+                ResolvedExpected::ErrorContains(substr) => Ok(match actual {
+                    Err(message) if message.contains(&substr) => Vec::new(),
+                    Err(message) => vec![make_drift_record(
+                        ComparisonCategory::Value,
+                        DriftLevel::Critical,
+                        "series_fillna.error",
+                        format!(
+                            "expected series_fillna error containing '{substr}', got '{message}'"
+                        ),
+                    )],
+                    Ok(_) => vec![make_drift_record(
+                        ComparisonCategory::Value,
+                        DriftLevel::Critical,
+                        "series_fillna.error",
+                        "expected series_fillna to fail but operation succeeded".to_owned(),
+                    )],
+                }),
+                ResolvedExpected::ErrorAny => Ok(match actual {
+                    Err(_) => Vec::new(),
+                    Ok(_) => vec![make_drift_record(
+                        ComparisonCategory::Value,
+                        DriftLevel::Critical,
+                        "series_fillna.error",
+                        "expected series_fillna to fail but operation succeeded".to_owned(),
+                    )],
+                }),
+                _ => Err("expected_series or expected_error required for series_fillna".to_owned()),
+            }
+        }
+        FixtureOperation::SeriesDropNa => {
+            let left = require_left_series(fixture)?;
+            let series = build_series(left)?;
+            let actual = series.dropna().map_err(|err| err.to_string());
+            match expected {
+                ResolvedExpected::Series(s) => Ok(diff_series(&actual?, &s)),
+                ResolvedExpected::ErrorContains(substr) => Ok(match actual {
+                    Err(message) if message.contains(&substr) => Vec::new(),
+                    Err(message) => vec![make_drift_record(
+                        ComparisonCategory::Value,
+                        DriftLevel::Critical,
+                        "series_dropna.error",
+                        format!(
+                            "expected series_dropna error containing '{substr}', got '{message}'"
+                        ),
+                    )],
+                    Ok(_) => vec![make_drift_record(
+                        ComparisonCategory::Value,
+                        DriftLevel::Critical,
+                        "series_dropna.error",
+                        "expected series_dropna to fail but operation succeeded".to_owned(),
+                    )],
+                }),
+                ResolvedExpected::ErrorAny => Ok(match actual {
+                    Err(_) => Vec::new(),
+                    Ok(_) => vec![make_drift_record(
+                        ComparisonCategory::Value,
+                        DriftLevel::Critical,
+                        "series_dropna.error",
+                        "expected series_dropna to fail but operation succeeded".to_owned(),
+                    )],
+                }),
+                _ => Err("expected_series or expected_error required for series_dropna".to_owned()),
+            }
+        }
+        FixtureOperation::SeriesCount => {
+            let left = require_left_series(fixture)?;
+            let series = build_series(left)?;
+            let actual = Scalar::Int64(series.count() as i64);
+            match expected {
+                ResolvedExpected::Scalar(scalar) => Ok(diff_scalar(
+                    &actual,
+                    &scalar,
+                    fixture.operation.operation_name(),
+                )),
+                _ => Err("expected_scalar required for series_count".to_owned()),
+            }
+        }
+        FixtureOperation::DataFrameCount => {
+            let frame = build_dataframe(require_frame(fixture)?)
+                .map_err(|err| format!("frame build failed: {err}"))?;
+            let actual = frame.count().map_err(|err| err.to_string());
+            match expected {
+                ResolvedExpected::Series(series) => Ok(diff_series(&actual?, &series)),
+                ResolvedExpected::ErrorContains(substr) => Ok(match actual {
+                    Err(message) if message.contains(&substr) => Vec::new(),
+                    Err(message) => vec![make_drift_record(
+                        ComparisonCategory::Value,
+                        DriftLevel::Critical,
+                        "dataframe_count.error",
+                        format!(
+                            "expected dataframe_count error containing '{substr}', got '{message}'"
+                        ),
+                    )],
+                    Ok(_) => vec![make_drift_record(
+                        ComparisonCategory::Value,
+                        DriftLevel::Critical,
+                        "dataframe_count.error",
+                        "expected dataframe_count to fail but operation succeeded".to_owned(),
+                    )],
+                }),
+                ResolvedExpected::ErrorAny => Ok(match actual {
+                    Err(_) => Vec::new(),
+                    Ok(_) => vec![make_drift_record(
+                        ComparisonCategory::Value,
+                        DriftLevel::Critical,
+                        "dataframe_count.error",
+                        "expected dataframe_count to fail but operation succeeded".to_owned(),
+                    )],
+                }),
+                _ => {
+                    Err("expected_series or expected_error required for dataframe_count".to_owned())
+                }
+            }
+        }
         FixtureOperation::SeriesAny => {
             let left = require_left_series(fixture)?;
             let series = build_series(left)?;
@@ -6326,6 +7237,13 @@ fn execute_and_compare_differential(
         FixtureOperation::DataFrameMerge
         | FixtureOperation::DataFrameMergeIndex
         | FixtureOperation::DataFrameConcat
+        | FixtureOperation::DataFrameIsNa
+        | FixtureOperation::DataFrameNotNa
+        | FixtureOperation::DataFrameIsNull
+        | FixtureOperation::DataFrameNotNull
+        | FixtureOperation::DataFrameFillNa
+        | FixtureOperation::DataFrameDropNa
+        | FixtureOperation::DataFrameDropNaColumns
         | FixtureOperation::DataFrameSortIndex
         | FixtureOperation::DataFrameSortValues => {
             let actual = execute_dataframe_fixture_operation(fixture);
@@ -8634,6 +9552,149 @@ mod tests {
         assert!(
             report.fixture_count >= 8,
             "expected FP-P2D-041 series any/all fixtures"
+        );
+        assert!(report.is_green(), "expected report green: {report:?}");
+    }
+
+    #[test]
+    fn packet_filter_runs_series_value_counts_packet() {
+        let cfg = HarnessConfig::default_paths();
+        let report =
+            run_packet_by_id(&cfg, "FP-P2D-042", OracleMode::FixtureExpected).expect("report");
+        assert_eq!(report.packet_id.as_deref(), Some("FP-P2D-042"));
+        assert!(
+            report.fixture_count >= 4,
+            "expected FP-P2D-042 series value_counts fixtures"
+        );
+        assert!(report.is_green(), "expected report green: {report:?}");
+    }
+
+    #[test]
+    fn packet_filter_runs_series_sort_packet() {
+        let cfg = HarnessConfig::default_paths();
+        let report =
+            run_packet_by_id(&cfg, "FP-P2D-043", OracleMode::FixtureExpected).expect("report");
+        assert_eq!(report.packet_id.as_deref(), Some("FP-P2D-043"));
+        assert!(
+            report.fixture_count >= 6,
+            "expected FP-P2D-043 series sort index/value fixtures"
+        );
+        assert!(report.is_green(), "expected report green: {report:?}");
+    }
+
+    #[test]
+    fn packet_filter_runs_series_tail_packet() {
+        let cfg = HarnessConfig::default_paths();
+        let report =
+            run_packet_by_id(&cfg, "FP-P2D-044", OracleMode::FixtureExpected).expect("report");
+        assert_eq!(report.packet_id.as_deref(), Some("FP-P2D-044"));
+        assert!(
+            report.fixture_count >= 6,
+            "expected FP-P2D-044 series tail fixtures"
+        );
+        assert!(report.is_green(), "expected report green: {report:?}");
+    }
+
+    #[test]
+    fn packet_filter_runs_series_isna_notna_packet() {
+        let cfg = HarnessConfig::default_paths();
+        let report =
+            run_packet_by_id(&cfg, "FP-P2D-045", OracleMode::FixtureExpected).expect("report");
+        assert_eq!(report.packet_id.as_deref(), Some("FP-P2D-045"));
+        assert!(
+            report.fixture_count >= 6,
+            "expected FP-P2D-045 series isna/notna fixtures"
+        );
+        assert!(report.is_green(), "expected report green: {report:?}");
+    }
+
+    #[test]
+    fn packet_filter_runs_series_fillna_dropna_packet() {
+        let cfg = HarnessConfig::default_paths();
+        let report =
+            run_packet_by_id(&cfg, "FP-P2D-046", OracleMode::FixtureExpected).expect("report");
+        assert_eq!(report.packet_id.as_deref(), Some("FP-P2D-046"));
+        assert!(
+            report.fixture_count >= 8,
+            "expected FP-P2D-046 series fillna/dropna fixtures"
+        );
+        assert!(report.is_green(), "expected report green: {report:?}");
+    }
+
+    #[test]
+    fn packet_filter_runs_series_count_packet() {
+        let cfg = HarnessConfig::default_paths();
+        let report =
+            run_packet_by_id(&cfg, "FP-P2D-047", OracleMode::FixtureExpected).expect("report");
+        assert_eq!(report.packet_id.as_deref(), Some("FP-P2D-047"));
+        assert!(
+            report.fixture_count >= 4,
+            "expected FP-P2D-047 series count fixtures"
+        );
+        assert!(report.is_green(), "expected report green: {report:?}");
+    }
+
+    #[test]
+    fn packet_filter_runs_series_isnull_notnull_packet() {
+        let cfg = HarnessConfig::default_paths();
+        let report =
+            run_packet_by_id(&cfg, "FP-P2D-048", OracleMode::FixtureExpected).expect("report");
+        assert_eq!(report.packet_id.as_deref(), Some("FP-P2D-048"));
+        assert!(
+            report.fixture_count >= 6,
+            "expected FP-P2D-048 series isnull/notnull fixtures"
+        );
+        assert!(report.is_green(), "expected report green: {report:?}");
+    }
+
+    #[test]
+    fn packet_filter_runs_dataframe_isna_notna_isnull_notnull_packet() {
+        let cfg = HarnessConfig::default_paths();
+        let report =
+            run_packet_by_id(&cfg, "FP-P2D-049", OracleMode::FixtureExpected).expect("report");
+        assert_eq!(report.packet_id.as_deref(), Some("FP-P2D-049"));
+        assert!(
+            report.fixture_count >= 6,
+            "expected FP-P2D-049 dataframe missingness fixtures"
+        );
+        assert!(report.is_green(), "expected report green: {report:?}");
+    }
+
+    #[test]
+    fn packet_filter_runs_dataframe_fillna_dropna_packet() {
+        let cfg = HarnessConfig::default_paths();
+        let report =
+            run_packet_by_id(&cfg, "FP-P2D-050", OracleMode::FixtureExpected).expect("report");
+        assert_eq!(report.packet_id.as_deref(), Some("FP-P2D-050"));
+        assert!(
+            report.fixture_count >= 8,
+            "expected FP-P2D-050 dataframe fillna/dropna fixtures"
+        );
+        assert!(report.is_green(), "expected report green: {report:?}");
+    }
+
+    #[test]
+    fn packet_filter_runs_dataframe_count_packet() {
+        let cfg = HarnessConfig::default_paths();
+        let report =
+            run_packet_by_id(&cfg, "FP-P2D-051", OracleMode::FixtureExpected).expect("report");
+        assert_eq!(report.packet_id.as_deref(), Some("FP-P2D-051"));
+        assert!(
+            report.fixture_count >= 4,
+            "expected FP-P2D-051 dataframe count fixtures"
+        );
+        assert!(report.is_green(), "expected report green: {report:?}");
+    }
+
+    #[test]
+    fn packet_filter_runs_dataframe_dropna_columns_packet() {
+        let cfg = HarnessConfig::default_paths();
+        let report =
+            run_packet_by_id(&cfg, "FP-P2D-052", OracleMode::FixtureExpected).expect("report");
+        assert_eq!(report.packet_id.as_deref(), Some("FP-P2D-052"));
+        assert!(
+            report.fixture_count >= 4,
+            "expected FP-P2D-052 dataframe dropna(axis=1) fixtures"
         );
         assert!(report.is_green(), "expected report green: {report:?}");
     }

@@ -1,0 +1,23 @@
+{
+  "packet_id": "FP-P2D-042",
+  "case_id": "series_value_counts_all_missing_strict",
+  "mode": "strict",
+  "operation": "series_value_counts",
+  "left": {
+    "name": "vals",
+    "index": [
+      { "kind": "utf8", "value": "r1" },
+      { "kind": "utf8", "value": "r2" },
+      { "kind": "utf8", "value": "r3" }
+    ],
+    "values": [
+      { "kind": "null", "value": "null" },
+      { "kind": "null", "value": "na_n" },
+      { "kind": "null", "value": "na_t" }
+    ]
+  },
+  "expected_series": {
+    "index": [],
+    "values": []
+  }
+}

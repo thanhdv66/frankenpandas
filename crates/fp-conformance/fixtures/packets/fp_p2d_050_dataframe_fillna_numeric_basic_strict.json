@@ -1,0 +1,51 @@
+{
+  "packet_id": "FP-P2D-050",
+  "case_id": "dataframe_fillna_numeric_basic_strict",
+  "mode": "strict",
+  "operation": "dataframe_fillna",
+  "frame": {
+    "index": [
+      { "kind": "utf8", "value": "r1" },
+      { "kind": "utf8", "value": "r2" },
+      { "kind": "utf8", "value": "r3" },
+      { "kind": "utf8", "value": "r4" }
+    ],
+    "columns": {
+      "a": [
+        { "kind": "int64", "value": 1 },
+        { "kind": "null", "value": "null" },
+        { "kind": "int64", "value": 3 },
+        { "kind": "null", "value": "na_n" }
+      ],
+      "b": [
+        { "kind": "int64", "value": 10 },
+        { "kind": "int64", "value": 20 },
+        { "kind": "null", "value": "null" },
+        { "kind": "int64", "value": 40 }
+      ]
+    }
+  },
+  "fill_value": { "kind": "int64", "value": 0 },
+  "expected_frame": {
+    "index": [
+      { "kind": "utf8", "value": "r1" },
+      { "kind": "utf8", "value": "r2" },
+      { "kind": "utf8", "value": "r3" },
+      { "kind": "utf8", "value": "r4" }
+    ],
+    "columns": {
+      "a": [
+        { "kind": "int64", "value": 1 },
+        { "kind": "int64", "value": 0 },
+        { "kind": "int64", "value": 3 },
+        { "kind": "int64", "value": 0 }
+      ],
+      "b": [
+        { "kind": "int64", "value": 10 },
+        { "kind": "int64", "value": 20 },
+        { "kind": "int64", "value": 0 },
+        { "kind": "int64", "value": 40 }
+      ]
+    }
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "packet_id": "FP-P2D-044",
+  "case_id": "series_tail_negative_preserves_nulls_hardened",
+  "mode": "hardened",
+  "operation": "series_tail",
+  "left": {
+    "name": "vals",
+    "index": [
+      { "kind": "utf8", "value": "r1" },
+      { "kind": "utf8", "value": "r2" },
+      { "kind": "utf8", "value": "r3" },
+      { "kind": "utf8", "value": "r4" }
+    ],
+    "values": [
+      { "kind": "int64", "value": 1 },
+      { "kind": "null", "value": "null" },
+      { "kind": "int64", "value": 3 },
+      { "kind": "null", "value": "null" }
+    ]
+  },
+  "tail_n": -1,
+  "expected_series": {
+    "index": [
+      { "kind": "utf8", "value": "r2" },
+      { "kind": "utf8", "value": "r3" },
+      { "kind": "utf8", "value": "r4" }
+    ],
+    "values": [
+      { "kind": "null", "value": "null" },
+      { "kind": "int64", "value": 3 },
+      { "kind": "null", "value": "null" }
+    ]
+  }
+}

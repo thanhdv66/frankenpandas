@@ -1,0 +1,26 @@
+{
+  "packet_id": "FP-P2D-047",
+  "case_id": "series_count_mixed_missing_strict",
+  "mode": "strict",
+  "operation": "series_count",
+  "left": {
+    "name": "vals",
+    "index": [
+      { "kind": "utf8", "value": "r1" },
+      { "kind": "utf8", "value": "r2" },
+      { "kind": "utf8", "value": "r3" },
+      { "kind": "utf8", "value": "r4" },
+      { "kind": "utf8", "value": "r5" },
+      { "kind": "utf8", "value": "r6" }
+    ],
+    "values": [
+      { "kind": "int64", "value": 1 },
+      { "kind": "null", "value": "null" },
+      { "kind": "null", "value": "na_n" },
+      { "kind": "int64", "value": 2 },
+      { "kind": "null", "value": "na_t" },
+      { "kind": "int64", "value": 3 }
+    ]
+  },
+  "expected_scalar": { "kind": "int64", "value": 3 }
+}

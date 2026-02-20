@@ -1,0 +1,20 @@
+{
+  "packet_id": "FP-P2D-047",
+  "case_id": "series_count_all_missing_hardened",
+  "mode": "hardened",
+  "operation": "series_count",
+  "left": {
+    "name": "vals",
+    "index": [
+      { "kind": "utf8", "value": "r1" },
+      { "kind": "utf8", "value": "r2" },
+      { "kind": "utf8", "value": "r3" }
+    ],
+    "values": [
+      { "kind": "null", "value": "null" },
+      { "kind": "null", "value": "na_n" },
+      { "kind": "null", "value": "na_t" }
+    ]
+  },
+  "expected_scalar": { "kind": "int64", "value": 0 }
+}

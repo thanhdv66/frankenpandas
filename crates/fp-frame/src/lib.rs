@@ -8,7 +8,7 @@ use fp_index::{
     AlignMode, DuplicateKeep, Index, IndexError, IndexLabel, align, align_union,
     validate_alignment_plan,
 };
-use fp_runtime::{DecisionAction, EvidenceLedger, RuntimeMode, RuntimePolicy};
+use fp_runtime::{DecisionAction, EvidenceLedger, RuntimePolicy};
 use fp_types::{DType, NullKind, Scalar};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -104,6 +104,22 @@ fn scalar_to_index_label(value: &Scalar) -> Result<IndexLabel, FrameError> {
     }
 }
 
+fn scalar_to_value_counts_index_label(value: &Scalar) -> IndexLabel {
+    match value {
+        Scalar::Int64(v) => IndexLabel::Int64(*v),
+        Scalar::Utf8(v) => IndexLabel::Utf8(v.clone()),
+        // Match pandas string representation for boolean index values.
+        Scalar::Bool(v) => IndexLabel::Utf8(if *v {
+            "True".to_owned()
+        } else {
+            "False".to_owned()
+        }),
+        // Keep float labels as textual index labels for current IndexLabel surface.
+        Scalar::Float64(v) => IndexLabel::Utf8(format!("{v:?}")),
+        Scalar::Null(_) => IndexLabel::Utf8("<null>".to_owned()),
+    }
+}
+
 fn index_label_to_scalar(label: &IndexLabel) -> Scalar {
     match label {
         IndexLabel::Int64(v) => Scalar::Int64(*v),
@@ -116,6 +132,74 @@ fn index_label_to_utf8_scalar(label: &IndexLabel) -> Scalar {
         IndexLabel::Int64(v) => Scalar::Utf8(v.to_string()),
         IndexLabel::Utf8(v) => Scalar::Utf8(v.clone()),
     }
+}
+
+fn index_position_groups(index: &Index) -> BTreeMap<IndexLabel, Vec<usize>> {
+    let mut groups: BTreeMap<IndexLabel, Vec<usize>> = BTreeMap::new();
+    for (pos, label) in index.labels().iter().enumerate() {
+        groups.entry(label.clone()).or_default().push(pos);
+    }
+    groups
+}
+
+/// Duplicate-aware outer alignment for Series arithmetic.
+///
+/// Mirrors pandas non-unique join behavior for `Series.align(join="outer")`
+/// with `sort=False`:
+/// - preserve left-then-unseen label order
+/// - shared labels materialize cartesian matches (lc * rc rows)
+/// - left-only and right-only labels keep their original multiplicity
+fn align_union_duplicate_aware(
+    left: &Index,
+    right: &Index,
+) -> (Index, Vec<Option<usize>>, Vec<Option<usize>>) {
+    let left_groups = index_position_groups(left);
+    let right_groups = index_position_groups(right);
+
+    let mut seen = BTreeSet::new();
+    let mut union_labels = Vec::new();
+    for label in left.labels().iter().chain(right.labels().iter()) {
+        if seen.insert(label.clone()) {
+            union_labels.push(label.clone());
+        }
+    }
+
+    let mut out_labels = Vec::new();
+    let mut left_positions = Vec::new();
+    let mut right_positions = Vec::new();
+
+    for label in union_labels {
+        let left_hits = left_groups.get(&label).map_or(&[][..], Vec::as_slice);
+        let right_hits = right_groups.get(&label).map_or(&[][..], Vec::as_slice);
+
+        if left_hits.is_empty() {
+            for &rp in right_hits {
+                out_labels.push(label.clone());
+                left_positions.push(None);
+                right_positions.push(Some(rp));
+            }
+            continue;
+        }
+
+        if right_hits.is_empty() {
+            for &lp in left_hits {
+                out_labels.push(label.clone());
+                left_positions.push(Some(lp));
+                right_positions.push(None);
+            }
+            continue;
+        }
+
+        for &lp in left_hits {
+            for &rp in right_hits {
+                out_labels.push(label.clone());
+                left_positions.push(Some(lp));
+                right_positions.push(Some(rp));
+            }
+        }
+    }
+
+    (Index::new(out_labels), left_positions, right_positions)
 }
 
 fn range_index(len: usize) -> Result<Index, FrameError> {
@@ -235,20 +319,11 @@ impl Series {
         let has_duplicate_labels = self.index.has_duplicates() || other.index.has_duplicates();
         let exact_duplicate_fast_path = has_duplicate_labels && self.index == other.index;
 
-        if has_duplicate_labels && !exact_duplicate_fast_path {
-            policy.decide_unknown_feature(
-                "index_alignment",
-                "duplicate labels are not yet fully modeled",
-                ledger,
-            );
-            if matches!(policy.mode, RuntimeMode::Strict) {
-                return Err(FrameError::DuplicateIndexUnsupported);
-            }
-        }
-
         let (union_index, left_positions, right_positions) = if exact_duplicate_fast_path {
             let positions = (0..self.len()).map(Some).collect::<Vec<_>>();
             (self.index.clone(), positions.clone(), positions)
+        } else if has_duplicate_labels {
+            align_union_duplicate_aware(&self.index, &other.index)
         } else {
             let plan = align_union(&self.index, &other.index);
             validate_alignment_plan(&plan)?;
@@ -349,6 +424,18 @@ impl Series {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.index.is_empty()
+    }
+
+    fn reorder_by_positions(&self, positions: &[usize]) -> Result<Self, FrameError> {
+        let mut out_labels = Vec::with_capacity(positions.len());
+        let mut out_values = Vec::with_capacity(positions.len());
+
+        for &position in positions {
+            out_labels.push(self.index.labels()[position].clone());
+            out_values.push(self.column.values()[position].clone());
+        }
+
+        Self::from_values(self.name.clone(), out_labels, out_values)
     }
 
     /// Align two Series by their indexes, returning a pair aligned to a common index.
@@ -678,6 +765,33 @@ impl Series {
         Self::from_values(self.name.clone(), out_labels, out_values)
     }
 
+    /// Return a new Series sorted by index labels.
+    ///
+    /// Matches `s.sort_index(ascending=...)` for the current 1D IndexLabel
+    /// model.
+    pub fn sort_index(&self, ascending: bool) -> Result<Self, FrameError> {
+        let mut order = self.index.argsort();
+        if !ascending {
+            order.reverse();
+        }
+        self.reorder_by_positions(&order)
+    }
+
+    /// Return a new Series sorted by values.
+    ///
+    /// Matches `s.sort_values(ascending=...)` with `na_position='last'`.
+    pub fn sort_values(&self, ascending: bool) -> Result<Self, FrameError> {
+        let mut order = (0..self.len()).collect::<Vec<_>>();
+        order.sort_by(|&left_pos, &right_pos| {
+            compare_scalars_with_na_last(
+                &self.values()[left_pos],
+                &self.values()[right_pos],
+                ascending,
+            )
+        });
+        self.reorder_by_positions(&order)
+    }
+
     /// Return the first `n` rows.
     ///
     /// Matches `s.head(n)`. If `n` is negative, this returns all rows except
@@ -775,6 +889,43 @@ impl Series {
     #[must_use]
     pub fn count(&self) -> usize {
         self.column.validity().count_valid()
+    }
+
+    /// Count unique non-missing values sorted by descending frequency.
+    ///
+    /// Matches `pd.Series.value_counts()` default behavior:
+    /// - `dropna=True` (missing values excluded)
+    /// - sort by count descending
+    /// - stable tie ordering by first appearance
+    pub fn value_counts(&self) -> Result<Self, FrameError> {
+        let mut counts: Vec<(Scalar, usize)> = Vec::new();
+
+        for value in self.column.values() {
+            if value.is_missing() {
+                continue;
+            }
+
+            if let Some((_, count)) = counts
+                .iter_mut()
+                .find(|(existing, _)| existing.semantic_eq(value))
+            {
+                *count += 1;
+            } else {
+                counts.push((value.clone(), 1));
+            }
+        }
+
+        // Stable descending sort keeps first-seen ordering for tied counts.
+        counts.sort_by(|(_, left_count), (_, right_count)| right_count.cmp(left_count));
+
+        let mut labels = Vec::with_capacity(counts.len());
+        let mut values = Vec::with_capacity(counts.len());
+        for (value, count) in counts {
+            labels.push(scalar_to_value_counts_index_label(&value));
+            values.push(Scalar::Int64(i64::try_from(count).unwrap_or(i64::MAX)));
+        }
+
+        Self::from_values("count", labels, values)
     }
 
     /// Cast values to a target dtype.
@@ -1897,6 +2048,30 @@ impl DataFrame {
         self.notna()
     }
 
+    /// Return non-missing counts for each column.
+    ///
+    /// Matches `df.count()` default behavior (`axis=0`, `skipna=True`).
+    pub fn count(&self) -> Result<Series, FrameError> {
+        let labels = self
+            .column_order
+            .iter()
+            .map(|name| IndexLabel::Utf8(name.clone()))
+            .collect::<Vec<_>>();
+        let values = self
+            .column_order
+            .iter()
+            .map(|name| {
+                let column = self
+                    .columns
+                    .get(name)
+                    .expect("column name listed in order must exist");
+                let count = i64::try_from(column.validity().count_valid()).unwrap_or(i64::MAX);
+                Scalar::Int64(count)
+            })
+            .collect::<Vec<_>>();
+        Series::from_values("count", labels, values)
+    }
+
     /// Fill missing values in each column with `fill_value`.
     ///
     /// Matches `df.fillna(value)` for scalar `value`.
@@ -2583,7 +2758,7 @@ mod tests {
     }
 
     #[test]
-    fn strict_mode_rejects_duplicate_indices() {
+    fn strict_mode_add_aligns_non_identical_duplicate_indices() {
         let left = Series::from_values(
             "left",
             vec![IndexLabel::from("a"), IndexLabel::from("a")],
@@ -2594,8 +2769,12 @@ mod tests {
             Series::from_values("right", vec![IndexLabel::from("a")], vec![Scalar::Int64(3)])
                 .expect("right");
 
-        let err = left.add(&right).expect_err("strict mode should reject");
-        assert!(matches!(err, FrameError::DuplicateIndexUnsupported));
+        let out = left.add(&right).expect("strict mode should align");
+        assert_eq!(
+            out.index().labels(),
+            &[IndexLabel::from("a"), IndexLabel::from("a")]
+        );
+        assert_eq!(out.values(), &[Scalar::Int64(4), Scalar::Int64(5)]);
     }
 
     #[test]
@@ -2956,7 +3135,7 @@ mod tests {
     }
 
     #[test]
-    fn series_sub_strict_rejects_duplicates() {
+    fn series_sub_strict_aligns_non_identical_duplicates() {
         let left = Series::from_values(
             "a",
             vec!["x".into(), "x".into()],
@@ -2965,8 +3144,49 @@ mod tests {
         .unwrap();
         let right = Series::from_values("b", vec!["x".into()], vec![Scalar::Int64(3)]).unwrap();
 
-        let err = left.sub(&right).expect_err("strict should reject");
-        assert!(matches!(err, FrameError::DuplicateIndexUnsupported));
+        let out = left.sub(&right).expect("strict should align");
+        assert_eq!(out.index().labels(), &["x".into(), "x".into()]);
+        assert_eq!(out.values(), &[Scalar::Int64(-2), Scalar::Int64(-1)]);
+    }
+
+    #[test]
+    fn series_add_non_identical_duplicate_indices_cross_products_shared_labels() {
+        let left = Series::from_values(
+            "left",
+            vec!["a".into(), "a".into(), "b".into()],
+            vec![Scalar::Int64(1), Scalar::Int64(2), Scalar::Int64(3)],
+        )
+        .unwrap();
+        let right = Series::from_values(
+            "right",
+            vec!["a".into(), "a".into(), "c".into()],
+            vec![Scalar::Int64(10), Scalar::Int64(20), Scalar::Int64(30)],
+        )
+        .unwrap();
+
+        let out = left.add(&right).expect("strict should align");
+        assert_eq!(
+            out.index().labels(),
+            &[
+                IndexLabel::from("a"),
+                IndexLabel::from("a"),
+                IndexLabel::from("a"),
+                IndexLabel::from("a"),
+                IndexLabel::from("b"),
+                IndexLabel::from("c")
+            ]
+        );
+        assert_eq!(
+            out.values(),
+            &[
+                Scalar::Int64(11),
+                Scalar::Int64(21),
+                Scalar::Int64(12),
+                Scalar::Int64(22),
+                Scalar::Null(NullKind::Null),
+                Scalar::Null(NullKind::Null)
+            ]
+        );
     }
 
     #[test]
@@ -4445,6 +4665,127 @@ mod tests {
     }
 
     #[test]
+    fn series_value_counts_sorts_desc_and_drops_missing() {
+        let s = Series::from_values(
+            "vals",
+            vec![
+                IndexLabel::from("r1"),
+                IndexLabel::from("r2"),
+                IndexLabel::from("r3"),
+                IndexLabel::from("r4"),
+                IndexLabel::from("r5"),
+                IndexLabel::from("r6"),
+                IndexLabel::from("r7"),
+            ],
+            vec![
+                Scalar::Int64(2),
+                Scalar::Int64(1),
+                Scalar::Int64(2),
+                Scalar::Null(NullKind::Null),
+                Scalar::Int64(3),
+                Scalar::Int64(1),
+                Scalar::Int64(2),
+            ],
+        )
+        .unwrap();
+
+        let out = s.value_counts().unwrap();
+        assert_eq!(
+            out.index().labels(),
+            &[
+                IndexLabel::Int64(2),
+                IndexLabel::Int64(1),
+                IndexLabel::Int64(3)
+            ]
+        );
+        assert_eq!(
+            out.values(),
+            &[Scalar::Int64(3), Scalar::Int64(2), Scalar::Int64(1)]
+        );
+    }
+
+    #[test]
+    fn series_value_counts_preserves_first_seen_order_for_ties() {
+        let s = Series::from_values(
+            "vals",
+            vec![
+                IndexLabel::from("r1"),
+                IndexLabel::from("r2"),
+                IndexLabel::from("r3"),
+                IndexLabel::from("r4"),
+                IndexLabel::from("r5"),
+            ],
+            vec![
+                Scalar::Utf8("b".to_owned()),
+                Scalar::Utf8("a".to_owned()),
+                Scalar::Utf8("b".to_owned()),
+                Scalar::Utf8("a".to_owned()),
+                Scalar::Utf8("c".to_owned()),
+            ],
+        )
+        .unwrap();
+
+        let out = s.value_counts().unwrap();
+        assert_eq!(
+            out.index().labels(),
+            &[
+                IndexLabel::from("b"),
+                IndexLabel::from("a"),
+                IndexLabel::from("c")
+            ]
+        );
+        assert_eq!(
+            out.values(),
+            &[Scalar::Int64(2), Scalar::Int64(2), Scalar::Int64(1)]
+        );
+    }
+
+    #[test]
+    fn series_value_counts_bool_labels_use_python_style_strings() {
+        let s = Series::from_values(
+            "vals",
+            vec![
+                IndexLabel::from("r1"),
+                IndexLabel::from("r2"),
+                IndexLabel::from("r3"),
+                IndexLabel::from("r4"),
+                IndexLabel::from("r5"),
+                IndexLabel::from("r6"),
+            ],
+            vec![
+                Scalar::Bool(true),
+                Scalar::Bool(false),
+                Scalar::Bool(true),
+                Scalar::Bool(true),
+                Scalar::Null(NullKind::Null),
+                Scalar::Bool(false),
+            ],
+        )
+        .unwrap();
+
+        let out = s.value_counts().unwrap();
+        assert_eq!(
+            out.index().labels(),
+            &[IndexLabel::from("True"), IndexLabel::from("False")]
+        );
+        assert_eq!(out.values(), &[Scalar::Int64(3), Scalar::Int64(2)]);
+    }
+
+    #[test]
+    fn series_value_counts_all_missing_returns_empty() {
+        let s = Series::from_values(
+            "vals",
+            vec![IndexLabel::from("r1"), IndexLabel::from("r2")],
+            vec![Scalar::Null(NullKind::Null), Scalar::Float64(f64::NAN)],
+        )
+        .unwrap();
+
+        let out = s.value_counts().unwrap();
+        assert!(out.index().labels().is_empty());
+        assert!(out.values().is_empty());
+    }
+
+    #[test]
     fn series_astype_casts_and_preserves_index() {
         let s = Series::from_values(
             "vals",
@@ -4741,6 +5082,196 @@ mod tests {
         let err = s.iloc(&[-3]).unwrap_err();
         assert!(
             matches!(err, FrameError::CompatibilityRejected(msg) if msg.contains("out of bounds"))
+        );
+    }
+
+    #[test]
+    fn series_sort_index_ascending_orders_labels_and_keeps_values_aligned() {
+        let s = Series::from_values(
+            "vals",
+            vec![
+                IndexLabel::from("z"),
+                IndexLabel::from("a"),
+                IndexLabel::from("m"),
+            ],
+            vec![Scalar::Int64(30), Scalar::Int64(10), Scalar::Int64(20)],
+        )
+        .unwrap();
+
+        let out = s.sort_index(true).unwrap();
+        assert_eq!(
+            out.index().labels(),
+            &[
+                IndexLabel::from("a"),
+                IndexLabel::from("m"),
+                IndexLabel::from("z")
+            ]
+        );
+        assert_eq!(
+            out.values(),
+            &[Scalar::Int64(10), Scalar::Int64(20), Scalar::Int64(30)]
+        );
+    }
+
+    #[test]
+    fn series_sort_index_descending_orders_labels_and_keeps_values_aligned() {
+        let s = Series::from_values(
+            "vals",
+            vec![
+                IndexLabel::Int64(3),
+                IndexLabel::Int64(1),
+                IndexLabel::Int64(2),
+            ],
+            vec![Scalar::Int64(30), Scalar::Int64(10), Scalar::Int64(20)],
+        )
+        .unwrap();
+
+        let out = s.sort_index(false).unwrap();
+        assert_eq!(
+            out.index().labels(),
+            &[
+                IndexLabel::Int64(3),
+                IndexLabel::Int64(2),
+                IndexLabel::Int64(1)
+            ]
+        );
+        assert_eq!(
+            out.values(),
+            &[Scalar::Int64(30), Scalar::Int64(20), Scalar::Int64(10)]
+        );
+    }
+
+    #[test]
+    fn series_sort_values_numeric_ascending_keeps_missing_last() {
+        let s = Series::from_values(
+            "vals",
+            vec![
+                IndexLabel::from("r1"),
+                IndexLabel::from("r2"),
+                IndexLabel::from("r3"),
+                IndexLabel::from("r4"),
+                IndexLabel::from("r5"),
+            ],
+            vec![
+                Scalar::Int64(3),
+                Scalar::Null(NullKind::Null),
+                Scalar::Int64(1),
+                Scalar::Int64(2),
+                Scalar::Float64(f64::NAN),
+            ],
+        )
+        .unwrap();
+
+        let out = s.sort_values(true).unwrap();
+        assert_eq!(
+            out.index().labels(),
+            &[
+                IndexLabel::from("r3"),
+                IndexLabel::from("r4"),
+                IndexLabel::from("r1"),
+                IndexLabel::from("r2"),
+                IndexLabel::from("r5")
+            ]
+        );
+        let expected = [
+            Scalar::Float64(1.0),
+            Scalar::Float64(2.0),
+            Scalar::Float64(3.0),
+            Scalar::Null(NullKind::NaN),
+            Scalar::Float64(f64::NAN),
+        ];
+        assert_eq!(out.values().len(), expected.len());
+        for (actual, expected) in out.values().iter().zip(expected.iter()) {
+            assert!(
+                actual.semantic_eq(expected),
+                "series_sort_values_numeric_ascending mismatch: actual={actual:?}, expected={expected:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn series_sort_values_numeric_descending_keeps_missing_last() {
+        let s = Series::from_values(
+            "vals",
+            vec![
+                IndexLabel::from("r1"),
+                IndexLabel::from("r2"),
+                IndexLabel::from("r3"),
+                IndexLabel::from("r4"),
+            ],
+            vec![
+                Scalar::Int64(1),
+                Scalar::Int64(3),
+                Scalar::Null(NullKind::Null),
+                Scalar::Int64(2),
+            ],
+        )
+        .unwrap();
+
+        let out = s.sort_values(false).unwrap();
+        assert_eq!(
+            out.index().labels(),
+            &[
+                IndexLabel::from("r2"),
+                IndexLabel::from("r4"),
+                IndexLabel::from("r1"),
+                IndexLabel::from("r3")
+            ]
+        );
+        assert_eq!(
+            out.values(),
+            &[
+                Scalar::Int64(3),
+                Scalar::Int64(2),
+                Scalar::Int64(1),
+                Scalar::Null(NullKind::Null)
+            ]
+        );
+    }
+
+    #[test]
+    fn series_sort_values_utf8_ties_preserve_input_order() {
+        let s = Series::from_values(
+            "vals",
+            vec![
+                IndexLabel::from("r1"),
+                IndexLabel::from("r2"),
+                IndexLabel::from("r3"),
+                IndexLabel::from("r4"),
+                IndexLabel::from("r5"),
+            ],
+            vec![
+                Scalar::Utf8("b".to_owned()),
+                Scalar::Utf8("a".to_owned()),
+                Scalar::Utf8("a".to_owned()),
+                Scalar::Utf8("c".to_owned()),
+                Scalar::Utf8("b".to_owned()),
+            ],
+        )
+        .unwrap();
+
+        let asc = s.sort_values(true).unwrap();
+        assert_eq!(
+            asc.index().labels(),
+            &[
+                IndexLabel::from("r2"),
+                IndexLabel::from("r3"),
+                IndexLabel::from("r1"),
+                IndexLabel::from("r5"),
+                IndexLabel::from("r4")
+            ]
+        );
+
+        let desc = s.sort_values(false).unwrap();
+        assert_eq!(
+            desc.index().labels(),
+            &[
+                IndexLabel::from("r4"),
+                IndexLabel::from("r1"),
+                IndexLabel::from("r5"),
+                IndexLabel::from("r2"),
+                IndexLabel::from("r3")
+            ]
         );
     }
 
@@ -5679,6 +6210,54 @@ mod tests {
 
         let notnull = df.notnull().unwrap();
         assert_eq!(notnull, notna);
+    }
+
+    #[test]
+    fn dataframe_count_counts_non_missing_per_column() {
+        let df = DataFrame::from_dict(
+            &["a", "b", "c"],
+            vec![
+                (
+                    "a",
+                    vec![
+                        Scalar::Int64(1),
+                        Scalar::Null(NullKind::Null),
+                        Scalar::Int64(3),
+                    ],
+                ),
+                (
+                    "b",
+                    vec![
+                        Scalar::Null(NullKind::Null),
+                        Scalar::Null(NullKind::NaN),
+                        Scalar::Int64(2),
+                    ],
+                ),
+                (
+                    "c",
+                    vec![
+                        Scalar::Utf8("x".to_owned()),
+                        Scalar::Utf8("y".to_owned()),
+                        Scalar::Utf8("z".to_owned()),
+                    ],
+                ),
+            ],
+        )
+        .unwrap();
+
+        let counts = df.count().unwrap();
+        assert_eq!(
+            counts.index().labels(),
+            &[
+                IndexLabel::Utf8("a".to_owned()),
+                IndexLabel::Utf8("b".to_owned()),
+                IndexLabel::Utf8("c".to_owned())
+            ]
+        );
+        assert_eq!(
+            counts.values(),
+            &[Scalar::Int64(2), Scalar::Int64(1), Scalar::Int64(3)]
+        );
     }
 
     #[test]
