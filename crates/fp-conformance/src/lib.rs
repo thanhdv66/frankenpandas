@@ -6047,9 +6047,7 @@ fn execute_and_compare_differential(
                         ComparisonCategory::Value,
                         DriftLevel::Critical,
                         "series_any.error",
-                        format!(
-                            "expected series_any error containing '{substr}', got '{message}'"
-                        ),
+                        format!("expected series_any error containing '{substr}', got '{message}'"),
                     )],
                     Ok(_) => vec![make_drift_record(
                         ComparisonCategory::Value,
@@ -6082,9 +6080,7 @@ fn execute_and_compare_differential(
                         ComparisonCategory::Value,
                         DriftLevel::Critical,
                         "series_all.error",
-                        format!(
-                            "expected series_all error containing '{substr}', got '{message}'"
-                        ),
+                        format!("expected series_all error containing '{substr}', got '{message}'"),
                     )],
                     Ok(_) => vec![make_drift_record(
                         ComparisonCategory::Value,
