@@ -1,0 +1,51 @@
+{
+  "packet_id": "FP-P2D-040",
+  "case_id": "dataframe_sort_values_numeric_ascending_na_last_strict",
+  "mode": "strict",
+  "operation": "dataframe_sort_values",
+  "sort_column": "score",
+  "frame": {
+    "index": [
+      { "kind": "utf8", "value": "r1" },
+      { "kind": "utf8", "value": "r2" },
+      { "kind": "utf8", "value": "r3" },
+      { "kind": "utf8", "value": "r4" }
+    ],
+    "columns": {
+      "score": [
+        { "kind": "int64", "value": 2 },
+        { "kind": "null", "value": "null" },
+        { "kind": "int64", "value": 1 },
+        { "kind": "int64", "value": 3 }
+      ],
+      "tag": [
+        { "kind": "utf8", "value": "x" },
+        { "kind": "utf8", "value": "null" },
+        { "kind": "utf8", "value": "y" },
+        { "kind": "utf8", "value": "z" }
+      ]
+    }
+  },
+  "expected_frame": {
+    "index": [
+      { "kind": "utf8", "value": "r3" },
+      { "kind": "utf8", "value": "r1" },
+      { "kind": "utf8", "value": "r4" },
+      { "kind": "utf8", "value": "r2" }
+    ],
+    "columns": {
+      "score": [
+        { "kind": "int64", "value": 1 },
+        { "kind": "int64", "value": 2 },
+        { "kind": "int64", "value": 3 },
+        { "kind": "null", "value": "null" }
+      ],
+      "tag": [
+        { "kind": "utf8", "value": "y" },
+        { "kind": "utf8", "value": "x" },
+        { "kind": "utf8", "value": "z" },
+        { "kind": "utf8", "value": "null" }
+      ]
+    }
+  }
+}

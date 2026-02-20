@@ -1,0 +1,20 @@
+{
+  "packet_id": "FP-P2D-041",
+  "case_id": "series_any_utf8_truthy_hardened",
+  "mode": "hardened",
+  "operation": "series_any",
+  "left": {
+    "name": "vals",
+    "index": [
+      { "kind": "utf8", "value": "r1" },
+      { "kind": "utf8", "value": "r2" },
+      { "kind": "utf8", "value": "r3" }
+    ],
+    "values": [
+      { "kind": "utf8", "value": "" },
+      { "kind": "utf8", "value": "hello" },
+      { "kind": "null", "value": "null" }
+    ]
+  },
+  "expected_bool": true
+}

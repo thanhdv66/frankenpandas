@@ -1,0 +1,20 @@
+{
+  "packet_id": "FP-P2D-041",
+  "case_id": "series_all_falsy_with_missing_strict",
+  "mode": "strict",
+  "operation": "series_all",
+  "left": {
+    "name": "vals",
+    "index": [
+      { "kind": "utf8", "value": "r1" },
+      { "kind": "utf8", "value": "r2" },
+      { "kind": "utf8", "value": "r3" }
+    ],
+    "values": [
+      { "kind": "int64", "value": 1 },
+      { "kind": "int64", "value": 0 },
+      { "kind": "null", "value": "null" }
+    ]
+  },
+  "expected_bool": false
+}
