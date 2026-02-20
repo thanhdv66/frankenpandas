@@ -232,7 +232,10 @@ impl Series {
         policy: &RuntimePolicy,
         ledger: &mut EvidenceLedger,
     ) -> Result<Self, FrameError> {
-        if self.index.has_duplicates() || other.index.has_duplicates() {
+        let has_duplicate_labels = self.index.has_duplicates() || other.index.has_duplicates();
+        let exact_duplicate_fast_path = has_duplicate_labels && self.index == other.index;
+
+        if has_duplicate_labels && !exact_duplicate_fast_path {
             policy.decide_unknown_feature(
                 "index_alignment",
                 "duplicate labels are not yet fully modeled",
@@ -243,13 +246,19 @@ impl Series {
             }
         }
 
-        let plan = align_union(&self.index, &other.index);
-        validate_alignment_plan(&plan)?;
+        let (union_index, left_positions, right_positions) = if exact_duplicate_fast_path {
+            let positions = (0..self.len()).map(Some).collect::<Vec<_>>();
+            (self.index.clone(), positions.clone(), positions)
+        } else {
+            let plan = align_union(&self.index, &other.index);
+            validate_alignment_plan(&plan)?;
+            (plan.union_index, plan.left_positions, plan.right_positions)
+        };
 
-        let left = self.column.reindex_by_positions(&plan.left_positions)?;
-        let right = other.column.reindex_by_positions(&plan.right_positions)?;
+        let left = self.column.reindex_by_positions(&left_positions)?;
+        let right = other.column.reindex_by_positions(&right_positions)?;
 
-        let action = policy.decide_join_admission(plan.union_index.len(), ledger);
+        let action = policy.decide_join_admission(union_index.len(), ledger);
         if matches!(action, DecisionAction::Reject) {
             return Err(FrameError::CompatibilityRejected(
                 "runtime policy rejected alignment admission".to_owned(),
@@ -271,7 +280,7 @@ impl Series {
             format!("{}{op_symbol}{}", self.name, other.name)
         };
 
-        Self::new(out_name, plan.union_index, column)
+        Self::new(out_name, union_index, column)
     }
 
     pub fn add_with_policy(
@@ -1114,7 +1123,9 @@ fn concat_dataframes_axis0_inner(frames: &[&DataFrame]) -> Result<DataFrame, Fra
 /// - Union index preserves left-then-unseen label order.
 /// - Missing rows in each input column materialize as `Scalar::Null`.
 /// - Duplicate output column names are rejected (fail-closed for MVP storage model).
-/// - Duplicate input index labels are rejected in this MVP slice.
+/// - Duplicate input index labels are supported only when every input index is
+///   exactly identical (`join='outer'` fast path); duplicate-index reindexing is
+///   compatibility-rejected.
 fn concat_dataframes_axis1(
     frames: &[&DataFrame],
     join: ConcatJoin,
@@ -1123,24 +1134,36 @@ fn concat_dataframes_axis1(
         return DataFrame::new(Index::new(Vec::new()), BTreeMap::new());
     }
 
-    if frames.iter().any(|frame| frame.index().has_duplicates()) {
-        return Err(FrameError::CompatibilityRejected(
-            "concat(axis=1) does not yet support duplicate index labels".to_owned(),
-        ));
-    }
-
     let target_index = match join {
         ConcatJoin::Outer => {
-            let mut union_index = frames[0].index().clone();
-            for frame in frames.iter().skip(1) {
-                let plan = align_union(&union_index, frame.index());
-                validate_alignment_plan(&plan)?;
-                union_index = plan.union_index;
+            let all_indexes_equal = frames
+                .windows(2)
+                .all(|window| window[0].index() == window[1].index());
+            if all_indexes_equal {
+                frames[0].index().clone()
+            } else {
+                // Match pandas union behavior for non-identical indexes:
+                // deduplicate labels while preserving first-seen order.
+                let mut seen = BTreeSet::new();
+                let mut labels = Vec::new();
+                for frame in frames {
+                    for label in frame.index().labels() {
+                        if seen.insert(label.clone()) {
+                            labels.push(label.clone());
+                        }
+                    }
+                }
+                Index::new(labels)
             }
-            union_index
         }
         ConcatJoin::Inner => {
-            let mut labels = frames[0].index().labels().to_vec();
+            let mut seen = BTreeSet::new();
+            let mut labels = Vec::new();
+            for label in frames[0].index().labels() {
+                if seen.insert(label.clone()) {
+                    labels.push(label.clone());
+                }
+            }
             for frame in frames.iter().skip(1) {
                 let positions = frame.index().position_map_first();
                 labels.retain(|label| positions.contains_key(label));
@@ -1152,7 +1175,15 @@ fn concat_dataframes_axis1(
     let mut columns = BTreeMap::new();
     let mut output_column_order = Vec::new();
     for frame in frames {
-        let positions = frame.index().get_indexer(&target_index);
+        let positions = if frame.index() == &target_index {
+            (0..frame.len()).map(Some).collect::<Vec<_>>()
+        } else if frame.index().has_duplicates() {
+            return Err(FrameError::CompatibilityRejected(
+                "concat(axis=1) cannot reindex duplicate index labels".to_owned(),
+            ));
+        } else {
+            frame.index().get_indexer(&target_index)
+        };
 
         for name in frame.column_names() {
             let column = frame
@@ -2568,6 +2599,31 @@ mod tests {
     }
 
     #[test]
+    fn strict_mode_allows_duplicate_indices_when_exactly_aligned() {
+        let left = Series::from_values(
+            "left",
+            vec![IndexLabel::from("a"), IndexLabel::from("a")],
+            vec![Scalar::Int64(1), Scalar::Int64(2)],
+        )
+        .expect("left");
+        let right = Series::from_values(
+            "right",
+            vec![IndexLabel::from("a"), IndexLabel::from("a")],
+            vec![Scalar::Int64(3), Scalar::Int64(4)],
+        )
+        .expect("right");
+
+        let out = left
+            .add(&right)
+            .expect("strict mode should allow exact duplicate alignment");
+        assert_eq!(
+            out.index().labels(),
+            &[IndexLabel::from("a"), IndexLabel::from("a")]
+        );
+        assert_eq!(out.values(), &[Scalar::Int64(4), Scalar::Int64(6)]);
+    }
+
+    #[test]
     fn concat_series_basic() {
         use super::concat_series;
 
@@ -3549,7 +3605,32 @@ mod tests {
     }
 
     #[test]
-    fn concat_dataframes_axis1_duplicate_index_rejects() {
+    fn concat_dataframes_axis1_duplicate_index_outer_exact_match_preserves_rows() {
+        let left = DataFrame::from_dict_with_index(
+            vec![("x", vec![Scalar::Int64(1), Scalar::Int64(2)])],
+            vec![0_i64.into(), 0_i64.into()],
+        )
+        .unwrap();
+        let right = DataFrame::from_dict_with_index(
+            vec![("y", vec![Scalar::Int64(3), Scalar::Int64(4)])],
+            vec![0_i64.into(), 0_i64.into()],
+        )
+        .unwrap();
+
+        let out = concat_dataframes_with_axis(&[&left, &right], 1).unwrap();
+        assert_eq!(out.index().labels(), &[0_i64.into(), 0_i64.into()]);
+        assert_eq!(
+            out.column("x").unwrap().values(),
+            &[Scalar::Int64(1), Scalar::Int64(2)]
+        );
+        assert_eq!(
+            out.column("y").unwrap().values(),
+            &[Scalar::Int64(3), Scalar::Int64(4)]
+        );
+    }
+
+    #[test]
+    fn concat_dataframes_axis1_duplicate_index_reindex_rejects() {
         let left = DataFrame::from_dict_with_index(
             vec![("x", vec![Scalar::Int64(1), Scalar::Int64(2)])],
             vec![0_i64.into(), 0_i64.into()],
@@ -3562,6 +3643,25 @@ mod tests {
         .unwrap();
 
         let err = concat_dataframes_with_axis(&[&left, &right], 1).expect_err("should reject");
+        assert!(matches!(err, FrameError::CompatibilityRejected(_)));
+        assert!(err.to_string().contains("duplicate index"));
+    }
+
+    #[test]
+    fn concat_dataframes_axis1_inner_duplicate_index_reindex_rejects() {
+        let left = DataFrame::from_dict_with_index(
+            vec![("x", vec![Scalar::Int64(1), Scalar::Int64(2)])],
+            vec![0_i64.into(), 0_i64.into()],
+        )
+        .unwrap();
+        let right = DataFrame::from_dict_with_index(
+            vec![("y", vec![Scalar::Int64(3), Scalar::Int64(4)])],
+            vec![0_i64.into(), 0_i64.into()],
+        )
+        .unwrap();
+
+        let err = concat_dataframes_with_axis_join(&[&left, &right], 1, ConcatJoin::Inner)
+            .expect_err("should reject");
         assert!(matches!(err, FrameError::CompatibilityRejected(_)));
         assert!(err.to_string().contains("duplicate index"));
     }
@@ -5853,7 +5953,10 @@ mod tests {
         );
         assert_eq!(
             out.column("index").unwrap().values(),
-            &[Scalar::Utf8("row-1".to_owned()), Scalar::Utf8("2".to_owned())]
+            &[
+                Scalar::Utf8("row-1".to_owned()),
+                Scalar::Utf8("2".to_owned())
+            ]
         );
         assert_eq!(
             out.column("v").unwrap().values(),
