@@ -314,31 +314,30 @@ impl MaterializedView {
         Ok(&self.result)
     }
 
-    fn is_linear(expr: &Expr) -> bool {
+    fn extract_series(expr: &Expr, series_set: &mut std::collections::BTreeSet<String>) {
         match expr {
-            Expr::Series { .. } => true,
+            Expr::Series { name } => {
+                series_set.insert(name.0.clone());
+            }
             Expr::Add { left, right }
             | Expr::Sub { left, right }
             | Expr::Mul { left, right }
             | Expr::Div { left, right }
             | Expr::And { left, right }
-            | Expr::Or { left, right } => Self::is_linear(left) && Self::is_linear(right),
-            Expr::Not { expr } => Self::is_linear(expr),
-            Expr::Compare { left, right, .. } => {
-                Self::is_linear_or_literal(left)
-                    && Self::is_linear_or_literal(right)
-                    && Self::comparison_is_anchored(left, right)
+            | Expr::Or { left, right }
+            | Expr::Compare { left, right, .. } => {
+                Self::extract_series(left, series_set);
+                Self::extract_series(right, series_set);
             }
-            Expr::Literal { .. } => false,
+            Expr::Not { expr } => Self::extract_series(expr, series_set),
+            Expr::Literal { .. } => {}
         }
     }
 
-    fn is_linear_or_literal(expr: &Expr) -> bool {
-        matches!(expr, Expr::Literal { .. }) || Self::is_linear(expr)
-    }
-
-    fn comparison_is_anchored(left: &Expr, right: &Expr) -> bool {
-        !(matches!(left, Expr::Literal { .. }) && matches!(right, Expr::Literal { .. }))
+    fn is_linear(expr: &Expr) -> bool {
+        let mut series_set = std::collections::BTreeSet::new();
+        Self::extract_series(expr, &mut series_set);
+        series_set.len() == 1
     }
 }
 
@@ -1355,7 +1354,7 @@ mod tests {
         assert!(MaterializedView::is_linear(&Expr::Series {
             name: SeriesRef("a".into()),
         }));
-        assert!(MaterializedView::is_linear(&Expr::Add {
+        assert!(!MaterializedView::is_linear(&Expr::Add {
             left: Box::new(Expr::Series {
                 name: SeriesRef("a".into()),
             }),
@@ -1363,7 +1362,7 @@ mod tests {
                 name: SeriesRef("b".into()),
             }),
         }));
-        assert!(MaterializedView::is_linear(&Expr::Sub {
+        assert!(!MaterializedView::is_linear(&Expr::Sub {
             left: Box::new(Expr::Series {
                 name: SeriesRef("a".into()),
             }),
@@ -1371,7 +1370,7 @@ mod tests {
                 name: SeriesRef("b".into()),
             }),
         }));
-        assert!(MaterializedView::is_linear(&Expr::Mul {
+        assert!(!MaterializedView::is_linear(&Expr::Mul {
             left: Box::new(Expr::Series {
                 name: SeriesRef("a".into()),
             }),
@@ -1379,7 +1378,7 @@ mod tests {
                 name: SeriesRef("b".into()),
             }),
         }));
-        assert!(MaterializedView::is_linear(&Expr::Div {
+        assert!(!MaterializedView::is_linear(&Expr::Div {
             left: Box::new(Expr::Series {
                 name: SeriesRef("a".into()),
             }),
@@ -1387,7 +1386,7 @@ mod tests {
                 name: SeriesRef("b".into()),
             }),
         }));
-        assert!(MaterializedView::is_linear(&Expr::And {
+        assert!(!MaterializedView::is_linear(&Expr::And {
             left: Box::new(Expr::Series {
                 name: SeriesRef("a".into()),
             }),
@@ -1395,7 +1394,7 @@ mod tests {
                 name: SeriesRef("b".into()),
             }),
         }));
-        assert!(MaterializedView::is_linear(&Expr::Or {
+        assert!(!MaterializedView::is_linear(&Expr::Or {
             left: Box::new(Expr::Series {
                 name: SeriesRef("a".into()),
             }),
@@ -1408,7 +1407,7 @@ mod tests {
                 name: SeriesRef("a".into()),
             }),
         }));
-        assert!(MaterializedView::is_linear(&Expr::Compare {
+        assert!(!MaterializedView::is_linear(&Expr::Compare {
             left: Box::new(Expr::Series {
                 name: SeriesRef("a".into()),
             }),

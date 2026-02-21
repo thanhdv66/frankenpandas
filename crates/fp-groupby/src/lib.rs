@@ -494,9 +494,9 @@ pub fn groupby_agg(
             (keys.values(), values.values())
         };
 
-    // Collect groups: key_ref -> (source_idx, accumulated values as f64 vec).
+    // Collect groups: key_ref -> (source_idx, accumulated values as Scalar vec).
     let mut ordering = Vec::<GroupKeyRef<'_>>::new();
-    let mut groups = HashMap::<GroupKeyRef<'_>, (usize, Vec<f64>)>::new();
+    let mut groups = HashMap::<GroupKeyRef<'_>, (usize, Vec<Scalar>)>::new();
 
     for (pos, (key, value)) in key_vals.iter().zip(val_vals.iter()).enumerate() {
         if options.dropna && key.is_missing() {
@@ -509,10 +509,8 @@ pub fn groupby_agg(
             (pos, Vec::new())
         });
 
-        if !value.is_missing()
-            && let Ok(v) = value.to_f64()
-        {
-            entry.1.push(v);
+        if !value.is_missing() {
+            entry.1.push(value.clone());
         }
     }
 
@@ -549,80 +547,28 @@ pub fn groupby_agg(
         });
 
         let agg_value = match func {
-            AggFunc::Sum => Scalar::Float64(vals.iter().sum()),
-            AggFunc::Mean => {
-                if vals.is_empty() {
-                    Scalar::Null(NullKind::Null)
-                } else {
-                    Scalar::Float64(vals.iter().sum::<f64>() / vals.len() as f64)
-                }
-            }
-            AggFunc::Count => Scalar::Int64(vals.len() as i64),
-            AggFunc::Min => {
-                if vals.is_empty() {
-                    Scalar::Null(NullKind::Null)
-                } else {
-                    Scalar::Float64(vals.iter().copied().fold(f64::INFINITY, f64::min))
-                }
-            }
-            AggFunc::Max => {
-                if vals.is_empty() {
-                    Scalar::Null(NullKind::Null)
-                } else {
-                    Scalar::Float64(vals.iter().copied().fold(f64::NEG_INFINITY, f64::max))
-                }
-            }
+            AggFunc::Sum => fp_types::nansum(vals),
+            AggFunc::Mean => fp_types::nanmean(vals),
+            AggFunc::Count => fp_types::nancount(vals),
+            AggFunc::Min => fp_types::nanmin(vals),
+            AggFunc::Max => fp_types::nanmax(vals),
             AggFunc::First => {
                 if vals.is_empty() {
                     Scalar::Null(NullKind::Null)
                 } else {
-                    Scalar::Float64(vals[0])
+                    vals[0].clone()
                 }
             }
             AggFunc::Last => {
                 if vals.is_empty() {
                     Scalar::Null(NullKind::Null)
                 } else {
-                    Scalar::Float64(vals[vals.len() - 1])
+                    vals[vals.len() - 1].clone()
                 }
             }
-            AggFunc::Var => {
-                if vals.len() < 2 {
-                    Scalar::Null(NullKind::Null)
-                } else {
-                    let n = vals.len() as f64;
-                    let mean = vals.iter().sum::<f64>() / n;
-                    let ss: f64 = vals.iter().map(|v| (v - mean).powi(2)).sum();
-                    Scalar::Float64(ss / (n - 1.0))
-                }
-            }
-            AggFunc::Std => {
-                if vals.len() < 2 {
-                    Scalar::Null(NullKind::Null)
-                } else {
-                    let n = vals.len() as f64;
-                    let mean = vals.iter().sum::<f64>() / n;
-                    let ss: f64 = vals.iter().map(|v| (v - mean).powi(2)).sum();
-                    Scalar::Float64((ss / (n - 1.0)).sqrt())
-                }
-            }
-            AggFunc::Median => {
-                if vals.is_empty() {
-                    Scalar::Null(NullKind::Null)
-                } else {
-                    let mut sorted = vals.clone();
-                    sorted.sort_unstable_by(|a, b| {
-                        a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
-                    });
-                    let mid = sorted.len() / 2;
-                    let median = if sorted.len() % 2 == 0 {
-                        (sorted[mid - 1] + sorted[mid]) / 2.0
-                    } else {
-                        sorted[mid]
-                    };
-                    Scalar::Float64(median)
-                }
-            }
+            AggFunc::Var => fp_types::nanvar(vals, 1),
+            AggFunc::Std => fp_types::nanstd(vals, 1),
+            AggFunc::Median => fp_types::nanmedian(vals),
         };
 
         out_values.push(agg_value);

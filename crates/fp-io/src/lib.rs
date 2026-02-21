@@ -338,11 +338,19 @@ pub fn read_json_str(input: &str, orient: JsonOrient) -> Result<DataFrame, IoErr
                 return Ok(DataFrame::new(Index::new(Vec::new()), BTreeMap::new())?);
             }
 
-            // Collect column names from first record
-            let first = arr[0]
-                .as_object()
-                .ok_or_else(|| IoError::JsonFormat("records must be objects".into()))?;
-            let col_names: Vec<String> = first.keys().cloned().collect();
+            // Collect column names from all records to handle heterogeneous keys
+            let mut col_names_set = std::collections::BTreeSet::new();
+            let mut col_names = Vec::new();
+            for record in arr {
+                let obj = record
+                    .as_object()
+                    .ok_or_else(|| IoError::JsonFormat("each record must be an object".into()))?;
+                for key in obj.keys() {
+                    if col_names_set.insert(key.clone()) {
+                        col_names.push(key.clone());
+                    }
+                }
+            }
 
             let mut columns: BTreeMap<String, Vec<Scalar>> = BTreeMap::new();
             for name in &col_names {
@@ -350,9 +358,7 @@ pub fn read_json_str(input: &str, orient: JsonOrient) -> Result<DataFrame, IoErr
             }
 
             for record in arr {
-                let obj = record
-                    .as_object()
-                    .ok_or_else(|| IoError::JsonFormat("each record must be an object".into()))?;
+                let obj = record.as_object().unwrap(); // Already validated
                 for name in &col_names {
                     let val = obj.get(name).unwrap_or(&serde_json::Value::Null);
                     columns

@@ -100,7 +100,18 @@ where
             }
         };
 
-        let payload = codec.decode(&encoded, config)?;
+        let payload = match codec.decode(&encoded, config) {
+            Ok(p) => p,
+            Err(_) => {
+                if policy.should_retry(attempts, plan.max_attempts) {
+                    continue;
+                }
+                return Err(AsupersyncError::RecoveryExhausted {
+                    artifact_id: plan.artifact_id.clone(),
+                    attempts,
+                });
+            }
+        };
         match verifier.verify(&plan.artifact_id, &payload.bytes, expected_digest) {
             Ok(integrity) => {
                 return Ok(RecoveryReport {
