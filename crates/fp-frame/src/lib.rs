@@ -3658,6 +3658,199 @@ impl DataFrame {
             sorted[lower] * (1.0 - frac) + sorted[upper] * frac
         }
     }
+
+    /// Keep values where `cond` is True; replace others with `other`.
+    ///
+    /// Matches `df.where(cond, other)`. Applies element-wise to each column.
+    /// If `other` is `None`, replaced values become NaN.
+    pub fn where_cond(
+        &self,
+        cond: &Self,
+        other: Option<&Scalar>,
+    ) -> Result<Self, FrameError> {
+        let fill = other.cloned().unwrap_or(Scalar::Null(NullKind::NaN));
+        let mut new_columns = BTreeMap::new();
+
+        for col_name in &self.column_order {
+            let data_col = self
+                .columns
+                .get(col_name)
+                .expect("column in order must exist");
+            let cond_col = cond
+                .columns
+                .get(col_name)
+                .ok_or_else(|| {
+                    FrameError::CompatibilityRejected(format!(
+                        "where: condition missing column '{col_name}'"
+                    ))
+                })?;
+
+            let values: Vec<Scalar> = data_col
+                .values()
+                .iter()
+                .zip(cond_col.values())
+                .map(|(val, c)| match c {
+                    Scalar::Bool(true) => val.clone(),
+                    Scalar::Bool(false) => fill.clone(),
+                    Scalar::Null(_) => Scalar::Null(NullKind::NaN),
+                    _ => fill.clone(),
+                })
+                .collect();
+
+            new_columns.insert(col_name.clone(), Column::from_values(values)?);
+        }
+
+        Self::new_with_column_order(
+            self.index.clone(),
+            new_columns,
+            self.column_order.clone(),
+        )
+    }
+
+    /// Replace values where `cond` is True with `other`.
+    ///
+    /// Matches `df.mask(cond, other)`. Inverse of `where_cond`.
+    pub fn mask(
+        &self,
+        cond: &Self,
+        other: Option<&Scalar>,
+    ) -> Result<Self, FrameError> {
+        let fill = other.cloned().unwrap_or(Scalar::Null(NullKind::NaN));
+        let mut new_columns = BTreeMap::new();
+
+        for col_name in &self.column_order {
+            let data_col = self
+                .columns
+                .get(col_name)
+                .expect("column in order must exist");
+            let cond_col = cond
+                .columns
+                .get(col_name)
+                .ok_or_else(|| {
+                    FrameError::CompatibilityRejected(format!(
+                        "mask: condition missing column '{col_name}'"
+                    ))
+                })?;
+
+            let values: Vec<Scalar> = data_col
+                .values()
+                .iter()
+                .zip(cond_col.values())
+                .map(|(val, c)| match c {
+                    Scalar::Bool(true) => fill.clone(),
+                    Scalar::Bool(false) => val.clone(),
+                    Scalar::Null(_) => Scalar::Null(NullKind::NaN),
+                    _ => val.clone(),
+                })
+                .collect();
+
+            new_columns.insert(col_name.clone(), Column::from_values(values)?);
+        }
+
+        Self::new_with_column_order(
+            self.index.clone(),
+            new_columns,
+            self.column_order.clone(),
+        )
+    }
+
+    /// Iterate over rows as `(IndexLabel, Vec<(&str, Scalar)>)` pairs.
+    ///
+    /// Matches `df.iterrows()`. Returns an iterator over (index_label, row_data)
+    /// where row_data is a vector of (column_name, value) pairs.
+    pub fn iterrows(&self) -> Vec<(IndexLabel, Vec<(&str, Scalar)>)> {
+        let mut rows = Vec::with_capacity(self.len());
+        for i in 0..self.len() {
+            let label = self.index.labels()[i].clone();
+            let row: Vec<(&str, Scalar)> = self
+                .column_order
+                .iter()
+                .map(|col_name| {
+                    let val = self.columns.get(col_name).map_or(
+                        Scalar::Null(NullKind::Null),
+                        |col| col.values()[i].clone(),
+                    );
+                    (col_name.as_str(), val)
+                })
+                .collect();
+            rows.push((label, row));
+        }
+        rows
+    }
+
+    /// Iterate over rows as tuples of `(IndexLabel, Vec<Scalar>)`.
+    ///
+    /// Matches `df.itertuples()`. Returns (index_label, values_in_column_order).
+    pub fn itertuples(&self) -> Vec<(IndexLabel, Vec<Scalar>)> {
+        let mut rows = Vec::with_capacity(self.len());
+        for i in 0..self.len() {
+            let label = self.index.labels()[i].clone();
+            let vals: Vec<Scalar> = self
+                .column_order
+                .iter()
+                .map(|col_name| {
+                    self.columns.get(col_name).map_or(
+                        Scalar::Null(NullKind::Null),
+                        |col| col.values()[i].clone(),
+                    )
+                })
+                .collect();
+            rows.push((label, vals));
+        }
+        rows
+    }
+
+    /// Iterate over columns as `(column_name, Series)` pairs.
+    ///
+    /// Matches `df.items()` / `df.iteritems()`.
+    pub fn items(&self) -> Result<Vec<(String, Series)>, FrameError> {
+        let mut result = Vec::with_capacity(self.column_order.len());
+        for col_name in &self.column_order {
+            let col = self
+                .columns
+                .get(col_name)
+                .expect("column in order must exist");
+            let series = Series::new(col_name.clone(), self.index.clone(), col.clone())?;
+            result.push((col_name.clone(), series));
+        }
+        Ok(result)
+    }
+
+    /// Assign new or overwrite existing columns.
+    ///
+    /// Matches `df.assign(**kwargs)`. Takes a list of (column_name, Column) pairs.
+    /// Existing columns are replaced; new columns are appended.
+    pub fn assign(&self, assignments: Vec<(&str, Column)>) -> Result<Self, FrameError> {
+        let mut new_columns = self.columns.clone();
+        let mut new_order = self.column_order.clone();
+
+        for (name, col) in assignments {
+            if col.len() != self.len() {
+                return Err(FrameError::LengthMismatch {
+                    index_len: self.len(),
+                    column_len: col.len(),
+                });
+            }
+            let name_str = name.to_owned();
+            if !new_columns.contains_key(&name_str) {
+                new_order.push(name_str.clone());
+            }
+            new_columns.insert(name_str, col);
+        }
+
+        Self::new_with_column_order(self.index.clone(), new_columns, new_order)
+    }
+
+    /// Apply a transformation function to the DataFrame.
+    ///
+    /// Matches `df.pipe(func)`. The function receives a reference to `self`
+    /// and returns a new DataFrame.
+    pub fn pipe<F>(&self, func: F) -> Result<Self, FrameError>
+    where
+        F: FnOnce(&Self) -> Result<Self, FrameError>,
+    {
+        func(self)
+    }
 }
 
 #[cfg(test)]
@@ -9203,5 +9396,210 @@ mod tests {
         assert_eq!(dict.len(), 2);
         assert_eq!(dict[0], (IndexLabel::Utf8("a".to_owned()), Scalar::Int64(10)));
         assert_eq!(dict[1], (IndexLabel::Utf8("b".to_owned()), Scalar::Int64(20)));
+    }
+
+    // --- DataFrame::where_cond / mask tests ---
+
+    #[test]
+    fn dataframe_where_cond_basic() {
+        let df = DataFrame::from_dict(
+            &["a", "b"],
+            vec![
+                ("a", vec![Scalar::Int64(1), Scalar::Int64(2)]),
+                ("b", vec![Scalar::Int64(3), Scalar::Int64(4)]),
+            ],
+        )
+        .unwrap();
+
+        let cond = DataFrame::from_dict(
+            &["a", "b"],
+            vec![
+                ("a", vec![Scalar::Bool(true), Scalar::Bool(false)]),
+                ("b", vec![Scalar::Bool(false), Scalar::Bool(true)]),
+            ],
+        )
+        .unwrap();
+
+        let result = df.where_cond(&cond, None).unwrap();
+        assert_eq!(result.column("a").unwrap().values()[0], Scalar::Int64(1));
+        assert!(result.column("a").unwrap().values()[1].is_missing());
+        assert!(result.column("b").unwrap().values()[0].is_missing());
+        assert_eq!(result.column("b").unwrap().values()[1], Scalar::Int64(4));
+    }
+
+    #[test]
+    fn dataframe_where_cond_with_fill() {
+        let df = DataFrame::from_dict(
+            &["x"],
+            vec![("x", vec![Scalar::Int64(10), Scalar::Int64(20)])],
+        )
+        .unwrap();
+
+        let cond = DataFrame::from_dict(
+            &["x"],
+            vec![("x", vec![Scalar::Bool(false), Scalar::Bool(true)])],
+        )
+        .unwrap();
+
+        let result = df.where_cond(&cond, Some(&Scalar::Int64(-1))).unwrap();
+        assert_eq!(result.column("x").unwrap().values()[0], Scalar::Int64(-1));
+        assert_eq!(result.column("x").unwrap().values()[1], Scalar::Int64(20));
+    }
+
+    #[test]
+    fn dataframe_mask_basic() {
+        let df = DataFrame::from_dict(
+            &["a"],
+            vec![("a", vec![Scalar::Int64(1), Scalar::Int64(2)])],
+        )
+        .unwrap();
+
+        let cond = DataFrame::from_dict(
+            &["a"],
+            vec![("a", vec![Scalar::Bool(true), Scalar::Bool(false)])],
+        )
+        .unwrap();
+
+        let result = df.mask(&cond, Some(&Scalar::Int64(0))).unwrap();
+        assert_eq!(result.column("a").unwrap().values()[0], Scalar::Int64(0)); // True -> replaced
+        assert_eq!(result.column("a").unwrap().values()[1], Scalar::Int64(2)); // False -> kept
+    }
+
+    // --- DataFrame::iterrows / itertuples / items tests ---
+
+    #[test]
+    fn dataframe_iterrows_basic() {
+        let df = DataFrame::from_dict(
+            &["x", "y"],
+            vec![
+                ("x", vec![Scalar::Int64(1), Scalar::Int64(2)]),
+                ("y", vec![Scalar::Int64(3), Scalar::Int64(4)]),
+            ],
+        )
+        .unwrap();
+
+        let rows = df.iterrows();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].1.len(), 2); // two columns
+        assert_eq!(rows[0].1[0].0, "x");
+        assert_eq!(rows[0].1[0].1, Scalar::Int64(1));
+        assert_eq!(rows[0].1[1].0, "y");
+        assert_eq!(rows[0].1[1].1, Scalar::Int64(3));
+    }
+
+    #[test]
+    fn dataframe_itertuples_basic() {
+        let df = DataFrame::from_dict(
+            &["a", "b"],
+            vec![
+                ("a", vec![Scalar::Int64(10), Scalar::Int64(20)]),
+                ("b", vec![Scalar::Int64(30), Scalar::Int64(40)]),
+            ],
+        )
+        .unwrap();
+
+        let tuples = df.itertuples();
+        assert_eq!(tuples.len(), 2);
+        assert_eq!(tuples[0].1, vec![Scalar::Int64(10), Scalar::Int64(30)]);
+        assert_eq!(tuples[1].1, vec![Scalar::Int64(20), Scalar::Int64(40)]);
+    }
+
+    #[test]
+    fn dataframe_items_basic() {
+        let df = DataFrame::from_dict(
+            &["col1", "col2"],
+            vec![
+                ("col1", vec![Scalar::Int64(1), Scalar::Int64(2)]),
+                ("col2", vec![Scalar::Int64(3), Scalar::Int64(4)]),
+            ],
+        )
+        .unwrap();
+
+        let items = df.items().unwrap();
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].0, "col1");
+        assert_eq!(items[0].1.values(), &[Scalar::Int64(1), Scalar::Int64(2)]);
+        assert_eq!(items[1].0, "col2");
+    }
+
+    // --- DataFrame::assign / pipe tests ---
+
+    #[test]
+    fn dataframe_assign_new_column() {
+        let df = DataFrame::from_dict(
+            &["a"],
+            vec![("a", vec![Scalar::Int64(1), Scalar::Int64(2)])],
+        )
+        .unwrap();
+
+        let new_col = fp_columnar::Column::from_values(vec![
+            Scalar::Int64(10),
+            Scalar::Int64(20),
+        ])
+        .unwrap();
+
+        let result = df.assign(vec![("b", new_col)]).unwrap();
+        assert_eq!(result.num_columns(), 2);
+        assert!(result.column("b").is_some());
+        assert_eq!(
+            result.column("b").unwrap().values(),
+            &[Scalar::Int64(10), Scalar::Int64(20)]
+        );
+    }
+
+    #[test]
+    fn dataframe_assign_overwrite_column() {
+        let df = DataFrame::from_dict(
+            &["a"],
+            vec![("a", vec![Scalar::Int64(1), Scalar::Int64(2)])],
+        )
+        .unwrap();
+
+        let new_col = fp_columnar::Column::from_values(vec![
+            Scalar::Int64(99),
+            Scalar::Int64(100),
+        ])
+        .unwrap();
+
+        let result = df.assign(vec![("a", new_col)]).unwrap();
+        assert_eq!(result.num_columns(), 1);
+        assert_eq!(
+            result.column("a").unwrap().values(),
+            &[Scalar::Int64(99), Scalar::Int64(100)]
+        );
+    }
+
+    #[test]
+    fn dataframe_assign_length_mismatch() {
+        let df = DataFrame::from_dict(
+            &["a"],
+            vec![("a", vec![Scalar::Int64(1), Scalar::Int64(2)])],
+        )
+        .unwrap();
+
+        let bad_col = fp_columnar::Column::from_values(vec![Scalar::Int64(1)]).unwrap();
+        assert!(df.assign(vec![("b", bad_col)]).is_err());
+    }
+
+    #[test]
+    fn dataframe_pipe_basic() {
+        let df = DataFrame::from_dict(
+            &["a"],
+            vec![("a", vec![Scalar::Int64(1), Scalar::Int64(2)])],
+        )
+        .unwrap();
+
+        let result = df
+            .pipe(|d| {
+                let col = fp_columnar::Column::from_values(vec![
+                    Scalar::Int64(10),
+                    Scalar::Int64(20),
+                ])?;
+                d.assign(vec![("b", col)])
+            })
+            .unwrap();
+
+        assert_eq!(result.num_columns(), 2);
+        assert!(result.column("b").is_some());
     }
 }

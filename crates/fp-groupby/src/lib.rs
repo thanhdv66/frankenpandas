@@ -1135,8 +1135,8 @@ mod tests {
     use fp_types::{NullKind, Scalar};
 
     use super::{
-        GroupByExecutionOptions, GroupByOptions, groupby_sum, groupby_sum_with_options,
-        groupby_sum_with_trace,
+        GroupByExecutionOptions, GroupByOptions, groupby_nunique, groupby_prod, groupby_size,
+        groupby_sum, groupby_sum_with_options, groupby_sum_with_trace,
     };
     use fp_frame::Series;
 
@@ -2623,7 +2623,7 @@ mod tests {
 
         let keys = Series::from_values(
             "key",
-            vec!["a".into(), "a".into(), "b".into(), "b".into(), "b".into()],
+            vec![0_i64.into(), 1_i64.into(), 2_i64.into(), 3_i64.into(), 4_i64.into()],
             vec![
                 Scalar::Utf8("x".to_owned()),
                 Scalar::Utf8("x".to_owned()),
@@ -2636,7 +2636,7 @@ mod tests {
 
         let values = Series::from_values(
             "val",
-            vec!["a".into(), "a".into(), "b".into(), "b".into(), "b".into()],
+            vec![0_i64.into(), 1_i64.into(), 2_i64.into(), 3_i64.into(), 4_i64.into()],
             vec![
                 Scalar::Int64(1),
                 Scalar::Int64(2),
@@ -2663,7 +2663,7 @@ mod tests {
 
         let keys = Series::from_values(
             "key",
-            vec!["a".into(), "a".into(), "a".into()],
+            vec![0_i64.into(), 1_i64.into(), 2_i64.into()],
             vec![
                 Scalar::Utf8("x".to_owned()),
                 Scalar::Utf8("x".to_owned()),
@@ -2674,7 +2674,7 @@ mod tests {
 
         let values = Series::from_values(
             "val",
-            vec!["a".into(), "a".into(), "a".into()],
+            vec![0_i64.into(), 1_i64.into(), 2_i64.into()],
             vec![
                 Scalar::Int64(1),
                 Scalar::Null(NullKind::Null),
@@ -2695,7 +2695,7 @@ mod tests {
 
         let keys = Series::from_values(
             "key",
-            vec!["a".into(), "a".into(), "b".into(), "b".into()],
+            vec![0_i64.into(), 1_i64.into(), 2_i64.into(), 3_i64.into()],
             vec![
                 Scalar::Utf8("x".to_owned()),
                 Scalar::Utf8("x".to_owned()),
@@ -2707,7 +2707,7 @@ mod tests {
 
         let values = Series::from_values(
             "val",
-            vec!["a".into(), "a".into(), "b".into(), "b".into()],
+            vec![0_i64.into(), 1_i64.into(), 2_i64.into(), 3_i64.into()],
             vec![
                 Scalar::Int64(2),
                 Scalar::Int64(3),
@@ -2731,7 +2731,7 @@ mod tests {
 
         let keys = Series::from_values(
             "key",
-            vec!["a".into(), "a".into(), "a".into(), "b".into()],
+            vec![0_i64.into(), 1_i64.into(), 2_i64.into(), 3_i64.into()],
             vec![
                 Scalar::Utf8("x".to_owned()),
                 Scalar::Utf8("x".to_owned()),
@@ -2743,7 +2743,7 @@ mod tests {
 
         let values = Series::from_values(
             "val",
-            vec!["a".into(), "a".into(), "a".into(), "b".into()],
+            vec![0_i64.into(), 1_i64.into(), 2_i64.into(), 3_i64.into()],
             vec![
                 Scalar::Int64(1),
                 Scalar::Null(NullKind::Null),
@@ -2768,7 +2768,7 @@ mod tests {
 
         let keys = Series::from_values(
             "key",
-            vec!["a".into(), "a".into()],
+            vec![0_i64.into(), 1_i64.into()],
             vec![
                 Scalar::Utf8("x".to_owned()),
                 Scalar::Utf8("x".to_owned()),
@@ -2778,7 +2778,7 @@ mod tests {
 
         let values = Series::from_values(
             "val",
-            vec!["a".into(), "a".into()],
+            vec![0_i64.into(), 1_i64.into()],
             vec![Scalar::Null(NullKind::Null), Scalar::Int64(5)],
         )
         .unwrap();
