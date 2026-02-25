@@ -4902,12 +4902,7 @@ impl DataFrame {
         for col_name in &self.column_order {
             let col = &self.columns[col_name];
             let new_vals: Vec<Scalar> = col.values().iter().map(&func).collect();
-            let dtype = if new_vals.is_empty() {
-                col.dtype()
-            } else {
-                new_vals[0].dtype()
-            };
-            result_cols.insert(col_name.clone(), Column::new(dtype, new_vals)?);
+            result_cols.insert(col_name.clone(), Column::from_values(new_vals)?);
         }
         Ok(Self {
             columns: result_cols,
@@ -12550,8 +12545,8 @@ mod tests {
 
         let result = df.groupby(&["grp"]).unwrap().count().unwrap();
         // Group "a": 1 non-null (NaN doesn't count); Group "b": 1
-        assert_eq!(result.columns["val"].values()[0], Scalar::Float64(1.0)); // count skips NaN
-        assert_eq!(result.columns["val"].values()[1], Scalar::Float64(1.0));
+        assert_eq!(result.columns["val"].values()[0], Scalar::Int64(1)); // count skips NaN
+        assert_eq!(result.columns["val"].values()[1], Scalar::Int64(1));
     }
 
     #[test]
