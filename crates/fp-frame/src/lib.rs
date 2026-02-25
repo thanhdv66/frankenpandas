@@ -1403,6 +1403,343 @@ impl Series {
         }
         Self::from_values(self.name.clone(), self.index.labels().to_vec(), out)
     }
+
+    /// Keep values where `cond` is True; replace others with `other`.
+    ///
+    /// Matches `series.where(cond, other)`. If `other` is `None`, replaced
+    /// values become `NaN`. The condition Series is aligned to `self` via
+    /// outer-index union before masking.
+    pub fn where_cond(
+        &self,
+        cond: &Self,
+        other: Option<&Scalar>,
+    ) -> Result<Self, FrameError> {
+        let plan = align_union(&self.index, &cond.index);
+        validate_alignment_plan(&plan)?;
+
+        let aligned_data = self.column.reindex_by_positions(&plan.left_positions)?;
+        let aligned_cond = cond.column.reindex_by_positions(&plan.right_positions)?;
+
+        let fill = other.cloned().unwrap_or(Scalar::Null(NullKind::NaN));
+
+        let values: Vec<Scalar> = aligned_data
+            .values()
+            .iter()
+            .zip(aligned_cond.values())
+            .map(|(val, c)| match c {
+                Scalar::Bool(true) => val.clone(),
+                Scalar::Bool(false) => fill.clone(),
+                Scalar::Null(_) => Scalar::Null(NullKind::NaN),
+                _ => fill.clone(),
+            })
+            .collect();
+
+        Self::from_values(
+            self.name.clone(),
+            plan.union_index.labels().to_vec(),
+            values,
+        )
+    }
+
+    /// Replace values where `cond` is True with `other`.
+    ///
+    /// Matches `series.mask(cond, other)`. This is the inverse of `where`:
+    /// values are replaced where the condition IS True, not where it is False.
+    pub fn mask(
+        &self,
+        cond: &Self,
+        other: Option<&Scalar>,
+    ) -> Result<Self, FrameError> {
+        let plan = align_union(&self.index, &cond.index);
+        validate_alignment_plan(&plan)?;
+
+        let aligned_data = self.column.reindex_by_positions(&plan.left_positions)?;
+        let aligned_cond = cond.column.reindex_by_positions(&plan.right_positions)?;
+
+        let fill = other.cloned().unwrap_or(Scalar::Null(NullKind::NaN));
+
+        let values: Vec<Scalar> = aligned_data
+            .values()
+            .iter()
+            .zip(aligned_cond.values())
+            .map(|(val, c)| match c {
+                Scalar::Bool(true) => fill.clone(),
+                Scalar::Bool(false) => val.clone(),
+                Scalar::Null(_) => Scalar::Null(NullKind::NaN),
+                _ => val.clone(),
+            })
+            .collect();
+
+        Self::from_values(
+            self.name.clone(),
+            plan.union_index.labels().to_vec(),
+            values,
+        )
+    }
+
+    /// Test whether each element is contained in a set of values.
+    ///
+    /// Matches `series.isin(values)`. Returns a boolean Series with the same
+    /// index. Null elements produce `false` (matching pandas behavior).
+    pub fn isin(&self, test_values: &[Scalar]) -> Result<Self, FrameError> {
+        let values: Vec<Scalar> = self
+            .column
+            .values()
+            .iter()
+            .map(|val| {
+                if val.is_missing() {
+                    // pandas: NaN.isin([NaN]) returns True only when NaN is in values
+                    let has_nan = test_values.iter().any(|tv| tv.is_missing());
+                    Scalar::Bool(has_nan)
+                } else {
+                    Scalar::Bool(test_values.iter().any(|tv| {
+                        if tv.is_missing() {
+                            return false;
+                        }
+                        // Compare numerically for Int64/Float64 cross-type
+                        match (val, tv) {
+                            (Scalar::Int64(a), Scalar::Float64(b)) => {
+                                (*a as f64) == *b
+                            }
+                            (Scalar::Float64(a), Scalar::Int64(b)) => {
+                                *a == (*b as f64)
+                            }
+                            _ => val == tv,
+                        }
+                    }))
+                }
+            })
+            .collect();
+
+        Self::from_values(self.name.clone(), self.index.labels().to_vec(), values)
+    }
+
+    /// Test whether each element falls within a range.
+    ///
+    /// Matches `series.between(left, right, inclusive='both')`. Returns a
+    /// boolean Series. The `inclusive` parameter controls boundary behavior:
+    /// - `"both"`: `left <= x <= right`
+    /// - `"neither"`: `left < x < right`
+    /// - `"left"`: `left <= x < right`
+    /// - `"right"`: `left < x <= right`
+    ///
+    /// Null elements produce `false`.
+    pub fn between(
+        &self,
+        left: &Scalar,
+        right: &Scalar,
+        inclusive: &str,
+    ) -> Result<Self, FrameError> {
+        let left_f = left.to_f64().map_err(ColumnError::from)?;
+        let right_f = right.to_f64().map_err(ColumnError::from)?;
+
+        let values: Vec<Scalar> = self
+            .column
+            .values()
+            .iter()
+            .map(|val| {
+                if val.is_missing() {
+                    return Scalar::Bool(false);
+                }
+                match val.to_f64() {
+                    Ok(v) => {
+                        let result = match inclusive {
+                            "both" => v >= left_f && v <= right_f,
+                            "neither" => v > left_f && v < right_f,
+                            "left" => v >= left_f && v < right_f,
+                            "right" => v > left_f && v <= right_f,
+                            _ => v >= left_f && v <= right_f, // default to "both"
+                        };
+                        Scalar::Bool(result)
+                    }
+                    Err(_) => Scalar::Bool(false),
+                }
+            })
+            .collect();
+
+        Self::from_values(self.name.clone(), self.index.labels().to_vec(), values)
+    }
+
+    /// Return the label of the minimum value.
+    ///
+    /// Matches `series.idxmin()`. Skips missing values. Returns an error
+    /// if the series is empty or all-null.
+    pub fn idxmin(&self) -> Result<IndexLabel, FrameError> {
+        let mut best_idx: Option<usize> = None;
+        let mut best_val = f64::INFINITY;
+        for (i, val) in self.column.values().iter().enumerate() {
+            if val.is_missing() {
+                continue;
+            }
+            let v = val.to_f64().map_err(ColumnError::from)?;
+            if v < best_val {
+                best_val = v;
+                best_idx = Some(i);
+            }
+        }
+        best_idx
+            .map(|i| self.index.labels()[i].clone())
+            .ok_or_else(|| {
+                FrameError::CompatibilityRejected("idxmin of empty or all-null series".to_owned())
+            })
+    }
+
+    /// Return the label of the maximum value.
+    ///
+    /// Matches `series.idxmax()`. Skips missing values.
+    pub fn idxmax(&self) -> Result<IndexLabel, FrameError> {
+        let mut best_idx: Option<usize> = None;
+        let mut best_val = f64::NEG_INFINITY;
+        for (i, val) in self.column.values().iter().enumerate() {
+            if val.is_missing() {
+                continue;
+            }
+            let v = val.to_f64().map_err(ColumnError::from)?;
+            if v > best_val {
+                best_val = v;
+                best_idx = Some(i);
+            }
+        }
+        best_idx
+            .map(|i| self.index.labels()[i].clone())
+            .ok_or_else(|| {
+                FrameError::CompatibilityRejected("idxmax of empty or all-null series".to_owned())
+            })
+    }
+
+    /// Return the `n` largest values as a new Series, sorted descending.
+    ///
+    /// Matches `series.nlargest(n)`. Missing values are excluded.
+    pub fn nlargest(&self, n: usize) -> Result<Self, FrameError> {
+        let mut indexed: Vec<(usize, f64)> = self
+            .column
+            .values()
+            .iter()
+            .enumerate()
+            .filter_map(|(i, val)| {
+                if val.is_missing() {
+                    None
+                } else {
+                    val.to_f64().ok().map(|v| (i, v))
+                }
+            })
+            .collect();
+
+        // Sort descending by value, stable by position for ties
+        indexed.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(Ordering::Equal));
+        indexed.truncate(n);
+
+        let labels: Vec<IndexLabel> = indexed
+            .iter()
+            .map(|(i, _)| self.index.labels()[*i].clone())
+            .collect();
+        let values: Vec<Scalar> = indexed
+            .iter()
+            .map(|(i, _)| self.column.values()[*i].clone())
+            .collect();
+
+        Self::from_values(self.name.clone(), labels, values)
+    }
+
+    /// Return the `n` smallest values as a new Series, sorted ascending.
+    ///
+    /// Matches `series.nsmallest(n)`. Missing values are excluded.
+    pub fn nsmallest(&self, n: usize) -> Result<Self, FrameError> {
+        let mut indexed: Vec<(usize, f64)> = self
+            .column
+            .values()
+            .iter()
+            .enumerate()
+            .filter_map(|(i, val)| {
+                if val.is_missing() {
+                    None
+                } else {
+                    val.to_f64().ok().map(|v| (i, v))
+                }
+            })
+            .collect();
+
+        // Sort ascending by value, stable by position for ties
+        indexed.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(Ordering::Equal));
+        indexed.truncate(n);
+
+        let labels: Vec<IndexLabel> = indexed
+            .iter()
+            .map(|(i, _)| self.index.labels()[*i].clone())
+            .collect();
+        let values: Vec<Scalar> = indexed
+            .iter()
+            .map(|(i, _)| self.column.values()[*i].clone())
+            .collect();
+
+        Self::from_values(self.name.clone(), labels, values)
+    }
+
+    /// Percentage change between current and prior element.
+    ///
+    /// Matches `series.pct_change(periods=1)`. Returns a float Series where
+    /// the first `periods` elements are NaN. Missing values propagate as NaN.
+    pub fn pct_change(&self, periods: usize) -> Result<Self, FrameError> {
+        let len = self.len();
+        let mut out = Vec::with_capacity(len);
+
+        for i in 0..len {
+            if i < periods {
+                out.push(Scalar::Null(NullKind::NaN));
+                continue;
+            }
+            let current = &self.column.values()[i];
+            let previous = &self.column.values()[i - periods];
+
+            if current.is_missing() || previous.is_missing() {
+                out.push(Scalar::Null(NullKind::NaN));
+                continue;
+            }
+
+            match (current.to_f64(), previous.to_f64()) {
+                (Ok(cur), Ok(prev)) => {
+                    if prev == 0.0 {
+                        out.push(Scalar::Null(NullKind::NaN));
+                    } else {
+                        out.push(Scalar::Float64((cur - prev) / prev));
+                    }
+                }
+                _ => out.push(Scalar::Null(NullKind::NaN)),
+            }
+        }
+
+        Self::from_values(self.name.clone(), self.index.labels().to_vec(), out)
+    }
+
+    /// Convert Series to a single-column DataFrame.
+    ///
+    /// Matches `series.to_frame(name=None)`. Uses the series name as the
+    /// column name by default.
+    pub fn to_frame(&self, name: Option<&str>) -> Result<DataFrame, FrameError> {
+        let col_name = name.unwrap_or(&self.name).to_owned();
+        let mut columns = BTreeMap::new();
+        columns.insert(col_name.clone(), self.column.clone());
+        DataFrame::new_with_column_order(self.index.clone(), columns, vec![col_name])
+    }
+
+    /// Convert Series to a vector of scalars.
+    ///
+    /// Matches `series.to_list()`.
+    pub fn to_list(&self) -> Vec<Scalar> {
+        self.column.values().to_vec()
+    }
+
+    /// Convert Series to a vector of (label, scalar) pairs.
+    ///
+    /// Matches `series.to_dict()`.
+    pub fn to_dict(&self) -> Vec<(IndexLabel, Scalar)> {
+        self.index
+            .labels()
+            .iter()
+            .zip(self.column.values())
+            .map(|(lbl, val)| (lbl.clone(), val.clone()))
+            .collect()
+    }
 }
 
 /// Concatenate multiple Series along axis 0 (row-wise).
@@ -8319,5 +8656,299 @@ mod tests {
         assert_eq!(col0.values(), &[Scalar::Int64(1), Scalar::Int64(3)]);
         let col1 = t.column("1").unwrap();
         assert_eq!(col1.values(), &[Scalar::Int64(2), Scalar::Int64(4)]);
+    }
+
+    // --- Series::where_cond tests ---
+
+    #[test]
+    fn series_where_cond_basic() {
+        let s = Series::from_values(
+            "x",
+            vec!["a".into(), "b".into(), "c".into()],
+            vec![Scalar::Int64(1), Scalar::Int64(2), Scalar::Int64(3)],
+        )
+        .unwrap();
+
+        let cond = Series::from_values(
+            "c",
+            vec!["a".into(), "b".into(), "c".into()],
+            vec![Scalar::Bool(true), Scalar::Bool(false), Scalar::Bool(true)],
+        )
+        .unwrap();
+
+        let result = s.where_cond(&cond, None).unwrap();
+        assert_eq!(result.values()[0], Scalar::Int64(1));
+        assert!(result.values()[1].is_missing());
+        assert_eq!(result.values()[2], Scalar::Int64(3));
+    }
+
+    #[test]
+    fn series_where_cond_with_other() {
+        let s = Series::from_values(
+            "x",
+            vec!["a".into(), "b".into()],
+            vec![Scalar::Int64(10), Scalar::Int64(20)],
+        )
+        .unwrap();
+
+        let cond = Series::from_values(
+            "c",
+            vec!["a".into(), "b".into()],
+            vec![Scalar::Bool(false), Scalar::Bool(true)],
+        )
+        .unwrap();
+
+        let result = s.where_cond(&cond, Some(&Scalar::Int64(-1))).unwrap();
+        assert_eq!(result.values()[0], Scalar::Int64(-1));
+        assert_eq!(result.values()[1], Scalar::Int64(20));
+    }
+
+    #[test]
+    fn series_where_cond_null_propagation() {
+        let s = Series::from_values(
+            "x",
+            vec!["a".into(), "b".into()],
+            vec![Scalar::Int64(1), Scalar::Int64(2)],
+        )
+        .unwrap();
+
+        let cond = Series::from_values(
+            "c",
+            vec!["a".into(), "b".into()],
+            vec![Scalar::Null(NullKind::Null), Scalar::Bool(true)],
+        )
+        .unwrap();
+
+        let result = s.where_cond(&cond, None).unwrap();
+        assert!(result.values()[0].is_missing());
+        assert_eq!(result.values()[1], Scalar::Int64(2));
+    }
+
+    // --- Series::mask tests ---
+
+    #[test]
+    fn series_mask_basic() {
+        let s = Series::from_values(
+            "x",
+            vec!["a".into(), "b".into(), "c".into()],
+            vec![Scalar::Int64(1), Scalar::Int64(2), Scalar::Int64(3)],
+        )
+        .unwrap();
+
+        let cond = Series::from_values(
+            "c",
+            vec!["a".into(), "b".into(), "c".into()],
+            vec![Scalar::Bool(true), Scalar::Bool(false), Scalar::Bool(true)],
+        )
+        .unwrap();
+
+        let result = s.mask(&cond, None).unwrap();
+        assert!(result.values()[0].is_missing()); // True -> replaced
+        assert_eq!(result.values()[1], Scalar::Int64(2)); // False -> kept
+        assert!(result.values()[2].is_missing()); // True -> replaced
+    }
+
+    #[test]
+    fn series_mask_with_other() {
+        let s = Series::from_values(
+            "x",
+            vec!["a".into(), "b".into()],
+            vec![Scalar::Int64(10), Scalar::Int64(20)],
+        )
+        .unwrap();
+
+        let cond = Series::from_values(
+            "c",
+            vec!["a".into(), "b".into()],
+            vec![Scalar::Bool(true), Scalar::Bool(false)],
+        )
+        .unwrap();
+
+        let result = s.mask(&cond, Some(&Scalar::Int64(0))).unwrap();
+        assert_eq!(result.values()[0], Scalar::Int64(0)); // True -> replaced with 0
+        assert_eq!(result.values()[1], Scalar::Int64(20)); // False -> kept
+    }
+
+    // --- Series::isin tests ---
+
+    #[test]
+    fn series_isin_basic() {
+        let s = Series::from_values(
+            "x",
+            vec!["a".into(), "b".into(), "c".into(), "d".into()],
+            vec![
+                Scalar::Int64(1),
+                Scalar::Int64(2),
+                Scalar::Int64(3),
+                Scalar::Int64(4),
+            ],
+        )
+        .unwrap();
+
+        let result = s.isin(&[Scalar::Int64(2), Scalar::Int64(4)]).unwrap();
+        assert_eq!(result.values()[0], Scalar::Bool(false));
+        assert_eq!(result.values()[1], Scalar::Bool(true));
+        assert_eq!(result.values()[2], Scalar::Bool(false));
+        assert_eq!(result.values()[3], Scalar::Bool(true));
+    }
+
+    #[test]
+    fn series_isin_with_strings() {
+        let s = Series::from_values(
+            "x",
+            vec!["a".into(), "b".into(), "c".into()],
+            vec![
+                Scalar::Utf8("apple".to_owned()),
+                Scalar::Utf8("banana".to_owned()),
+                Scalar::Utf8("cherry".to_owned()),
+            ],
+        )
+        .unwrap();
+
+        let result = s
+            .isin(&[
+                Scalar::Utf8("banana".to_owned()),
+                Scalar::Utf8("date".to_owned()),
+            ])
+            .unwrap();
+        assert_eq!(result.values()[0], Scalar::Bool(false));
+        assert_eq!(result.values()[1], Scalar::Bool(true));
+        assert_eq!(result.values()[2], Scalar::Bool(false));
+    }
+
+    #[test]
+    fn series_isin_null_handling() {
+        let s = Series::from_values(
+            "x",
+            vec!["a".into(), "b".into(), "c".into()],
+            vec![
+                Scalar::Int64(1),
+                Scalar::Null(NullKind::Null),
+                Scalar::Int64(3),
+            ],
+        )
+        .unwrap();
+
+        // NaN not in test values -> False for null element
+        let result = s.isin(&[Scalar::Int64(1)]).unwrap();
+        assert_eq!(result.values()[0], Scalar::Bool(true));
+        assert_eq!(result.values()[1], Scalar::Bool(false));
+        assert_eq!(result.values()[2], Scalar::Bool(false));
+
+        // NaN in test values -> True for null element
+        let result_with_nan = s.isin(&[Scalar::Int64(1), Scalar::Null(NullKind::NaN)]).unwrap();
+        assert_eq!(result_with_nan.values()[1], Scalar::Bool(true));
+    }
+
+    #[test]
+    fn series_isin_cross_type() {
+        let s = Series::from_values(
+            "x",
+            vec!["a".into(), "b".into()],
+            vec![Scalar::Int64(2), Scalar::Float64(3.0)],
+        )
+        .unwrap();
+
+        let result = s.isin(&[Scalar::Float64(2.0), Scalar::Int64(3)]).unwrap();
+        assert_eq!(result.values()[0], Scalar::Bool(true));
+        assert_eq!(result.values()[1], Scalar::Bool(true));
+    }
+
+    // --- Series::between tests ---
+
+    #[test]
+    fn series_between_both_inclusive() {
+        let s = Series::from_values(
+            "x",
+            vec!["a".into(), "b".into(), "c".into(), "d".into(), "e".into()],
+            vec![
+                Scalar::Int64(1),
+                Scalar::Int64(2),
+                Scalar::Int64(3),
+                Scalar::Int64(4),
+                Scalar::Int64(5),
+            ],
+        )
+        .unwrap();
+
+        let result = s
+            .between(&Scalar::Int64(2), &Scalar::Int64(4), "both")
+            .unwrap();
+        assert_eq!(result.values()[0], Scalar::Bool(false)); // 1
+        assert_eq!(result.values()[1], Scalar::Bool(true)); // 2 (boundary)
+        assert_eq!(result.values()[2], Scalar::Bool(true)); // 3
+        assert_eq!(result.values()[3], Scalar::Bool(true)); // 4 (boundary)
+        assert_eq!(result.values()[4], Scalar::Bool(false)); // 5
+    }
+
+    #[test]
+    fn series_between_neither_inclusive() {
+        let s = Series::from_values(
+            "x",
+            vec!["a".into(), "b".into(), "c".into()],
+            vec![Scalar::Int64(2), Scalar::Int64(3), Scalar::Int64(4)],
+        )
+        .unwrap();
+
+        let result = s
+            .between(&Scalar::Int64(2), &Scalar::Int64(4), "neither")
+            .unwrap();
+        assert_eq!(result.values()[0], Scalar::Bool(false)); // 2 == left
+        assert_eq!(result.values()[1], Scalar::Bool(true)); // 3 is strictly between
+        assert_eq!(result.values()[2], Scalar::Bool(false)); // 4 == right
+    }
+
+    #[test]
+    fn series_between_left_inclusive() {
+        let s = Series::from_values(
+            "x",
+            vec!["a".into(), "b".into(), "c".into()],
+            vec![Scalar::Int64(2), Scalar::Int64(3), Scalar::Int64(4)],
+        )
+        .unwrap();
+
+        let result = s
+            .between(&Scalar::Int64(2), &Scalar::Int64(4), "left")
+            .unwrap();
+        assert_eq!(result.values()[0], Scalar::Bool(true)); // 2 == left -> included
+        assert_eq!(result.values()[1], Scalar::Bool(true)); // 3 in range
+        assert_eq!(result.values()[2], Scalar::Bool(false)); // 4 == right -> excluded
+    }
+
+    #[test]
+    fn series_between_null_produces_false() {
+        let s = Series::from_values(
+            "x",
+            vec!["a".into(), "b".into()],
+            vec![Scalar::Null(NullKind::NaN), Scalar::Int64(3)],
+        )
+        .unwrap();
+
+        let result = s
+            .between(&Scalar::Int64(1), &Scalar::Int64(5), "both")
+            .unwrap();
+        assert_eq!(result.values()[0], Scalar::Bool(false)); // NaN -> false
+        assert_eq!(result.values()[1], Scalar::Bool(true));
+    }
+
+    #[test]
+    fn series_between_float_range() {
+        let s = Series::from_values(
+            "x",
+            vec!["a".into(), "b".into(), "c".into()],
+            vec![
+                Scalar::Float64(1.5),
+                Scalar::Float64(2.5),
+                Scalar::Float64(3.5),
+            ],
+        )
+        .unwrap();
+
+        let result = s
+            .between(&Scalar::Float64(2.0), &Scalar::Float64(3.0), "both")
+            .unwrap();
+        assert_eq!(result.values()[0], Scalar::Bool(false));
+        assert_eq!(result.values()[1], Scalar::Bool(true));
+        assert_eq!(result.values()[2], Scalar::Bool(false));
     }
 }
