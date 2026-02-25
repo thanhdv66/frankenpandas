@@ -1698,11 +1698,7 @@ impl Series {
 
             match (current.to_f64(), previous.to_f64()) {
                 (Ok(cur), Ok(prev)) => {
-                    if prev == 0.0 {
-                        out.push(Scalar::Null(NullKind::NaN));
-                    } else {
-                        out.push(Scalar::Float64((cur - prev) / prev));
-                    }
+                    out.push(Scalar::Float64((cur - prev) / prev));
                 }
                 _ => out.push(Scalar::Null(NullKind::NaN)),
             }
@@ -2141,12 +2137,7 @@ impl Rolling<'_> {
             let window_slice = &vals[start..=i];
             let count = window_slice.iter().filter(|v| !v.is_missing()).count();
 
-            if i + 1 < self.window {
-                // Before full window, still emit count (pandas behavior)
-                out.push(Scalar::Float64(count as f64));
-            } else {
-                out.push(Scalar::Float64(count as f64));
-            }
+            out.push(Scalar::Float64(count as f64));
         }
 
         Series::from_values(
@@ -5242,7 +5233,7 @@ impl DataFrame {
             }
         }
 
-        let value_col = Column::new(DType::Float64, values)?;
+        let value_col = Column::from_values(values)?;
         let mut cols = BTreeMap::new();
         cols.insert("value".to_string(), value_col);
 
@@ -5310,7 +5301,7 @@ impl DataFrame {
                     vals.push(Scalar::Null(NullKind::NaN));
                 }
             }
-            result_cols.insert(ck.clone(), Column::new(DType::Float64, vals)?);
+            result_cols.insert(ck.clone(), Column::from_values(vals)?);
         }
 
         let new_labels: Vec<IndexLabel> = row_order
@@ -5510,7 +5501,7 @@ impl DataFrameGroupBy<'_> {
                 agg_vals.push(agg_val);
             }
 
-            result_cols.insert(col_name.clone(), Column::new(DType::Float64, agg_vals)?);
+            result_cols.insert(col_name.clone(), Column::from_values(agg_vals)?);
             col_order.push(col_name.clone());
         }
 
