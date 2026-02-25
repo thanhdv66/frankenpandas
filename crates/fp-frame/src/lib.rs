@@ -1044,15 +1044,15 @@ impl Series {
             }
             let v = val.to_f64().map_err(ColumnError::from)?;
             let mut clamped = v;
-            if let Some(lo) = lower {
-                if clamped < lo {
-                    clamped = lo;
-                }
+            if let Some(lo) = lower
+                && clamped < lo
+            {
+                clamped = lo;
             }
-            if let Some(hi) = upper {
-                if clamped > hi {
-                    clamped = hi;
-                }
+            if let Some(hi) = upper
+                && clamped > hi
+            {
+                clamped = hi;
             }
             out.push(Scalar::Float64(clamped));
         }
@@ -3190,6 +3190,20 @@ impl DataFrame {
                         }
                     })
                     .collect();
+                let sample_var = |vals: &[f64]| -> f64 {
+                    if vals.len() < 2 {
+                        return f64::NAN;
+                    }
+                    let mean = vals.iter().sum::<f64>() / vals.len() as f64;
+                    let sum_sq_diff = vals
+                        .iter()
+                        .map(|v| {
+                            let diff = *v - mean;
+                            diff * diff
+                        })
+                        .sum::<f64>();
+                    sum_sq_diff / (vals.len() as f64 - 1.0)
+                };
                 let result = match func {
                     "sum" => row_vals.iter().sum::<f64>(),
                     "mean" => {
@@ -3210,6 +3224,8 @@ impl DataFrame {
                         .reduce(f64::max)
                         .unwrap_or(f64::NAN),
                     "count" => row_vals.len() as f64,
+                    "var" => sample_var(&row_vals),
+                    "std" => sample_var(&row_vals).sqrt(),
                     other => {
                         return Err(FrameError::CompatibilityRejected(format!(
                             "unsupported apply function: '{other}'"
@@ -5681,19 +5697,27 @@ mod tests {
 
     #[test]
     fn series_abs_and_round() {
+        let neg_pi = -std::f64::consts::PI;
+        let e = std::f64::consts::E;
         let s = Series::from_values(
             "vals",
             vec![IndexLabel::from("a"), IndexLabel::from("b")],
-            vec![Scalar::Float64(-3.14159), Scalar::Float64(2.71828)],
+            vec![Scalar::Float64(neg_pi), Scalar::Float64(e)],
         )
         .unwrap();
 
         let a = s.abs().unwrap();
-        assert_eq!(a.values()[0], Scalar::Float64(3.14159));
+        assert!(
+            matches!(a.values()[0], Scalar::Float64(v) if (v - std::f64::consts::PI).abs() < 1e-12)
+        );
 
         let r = s.round(2).unwrap();
-        assert_eq!(r.values()[0], Scalar::Float64(-3.14));
-        assert_eq!(r.values()[1], Scalar::Float64(2.72));
+        let expected_neg_pi_2dp = (neg_pi * 100.0).round() / 100.0;
+        let expected_e_2dp = (e * 100.0).round() / 100.0;
+        assert!(
+            matches!(r.values()[0], Scalar::Float64(v) if (v - expected_neg_pi_2dp).abs() < 1e-12)
+        );
+        assert!(matches!(r.values()[1], Scalar::Float64(v) if (v - expected_e_2dp).abs() < 1e-12));
     }
 
     #[test]
@@ -5740,6 +5764,57 @@ mod tests {
         let row_sums = df.apply("sum", 1).unwrap();
         assert_eq!(row_sums.values()[0], Scalar::Float64(4.0)); // 1+3
         assert_eq!(row_sums.values()[1], Scalar::Float64(6.0)); // 2+4
+    }
+
+    #[test]
+    fn dataframe_apply_row_wise_std_var() {
+        let df = DataFrame::from_dict(
+            &["a", "b", "c"],
+            vec![
+                ("a", vec![Scalar::Float64(1.0), Scalar::Float64(2.0)]),
+                ("b", vec![Scalar::Float64(3.0), Scalar::Float64(4.0)]),
+                (
+                    "c",
+                    vec![Scalar::Null(NullKind::Null), Scalar::Float64(6.0)],
+                ),
+            ],
+        )
+        .unwrap();
+
+        let row_vars = df.apply("var", 1).unwrap();
+        let row_stds = df.apply("std", 1).unwrap();
+
+        assert!(matches!(row_vars.values()[0], Scalar::Float64(v) if (v - 2.0).abs() < 1e-10));
+        assert!(matches!(row_vars.values()[1], Scalar::Float64(v) if (v - 4.0).abs() < 1e-10));
+        assert!(
+            matches!(row_stds.values()[0], Scalar::Float64(v) if (v - 2.0_f64.sqrt()).abs() < 1e-10)
+        );
+        assert!(matches!(row_stds.values()[1], Scalar::Float64(v) if (v - 2.0).abs() < 1e-10));
+    }
+
+    #[test]
+    fn dataframe_apply_row_wise_std_var_insufficient_values() {
+        let df = DataFrame::from_dict(
+            &["a", "b"],
+            vec![
+                ("a", vec![Scalar::Float64(1.0), Scalar::Float64(2.0)]),
+                (
+                    "b",
+                    vec![Scalar::Null(NullKind::Null), Scalar::Float64(4.0)],
+                ),
+            ],
+        )
+        .unwrap();
+
+        let row_vars = df.apply("var", 1).unwrap();
+        let row_stds = df.apply("std", 1).unwrap();
+
+        assert!(matches!(row_vars.values()[0], Scalar::Float64(v) if v.is_nan()));
+        assert!(matches!(row_stds.values()[0], Scalar::Float64(v) if v.is_nan()));
+        assert!(matches!(row_vars.values()[1], Scalar::Float64(v) if (v - 2.0).abs() < 1e-10));
+        assert!(
+            matches!(row_stds.values()[1], Scalar::Float64(v) if (v - 2.0_f64.sqrt()).abs() < 1e-10)
+        );
     }
 
     #[test]
