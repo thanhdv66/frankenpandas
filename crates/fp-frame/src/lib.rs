@@ -2324,10 +2324,10 @@ impl StringAccessor<'_> {
         )
     }
 
-    /// Get the length of each string.
+    /// Get the length of each string (character count, not byte count).
     pub fn len(&self) -> Result<Series, FrameError> {
         self.apply_str(
-            |s| Scalar::Int64(s.len() as i64),
+            |s| Scalar::Int64(s.chars().count() as i64),
             self.series.name(),
         )
     }
@@ -2418,10 +2418,11 @@ impl StringAccessor<'_> {
         let side_owned = side.to_string();
         self.apply_str(
             |s| {
-                if s.len() >= width {
+                let char_len = s.chars().count();
+                if char_len >= width {
                     return Scalar::Utf8(s.to_string());
                 }
-                let pad_len = width - s.len();
+                let pad_len = width - char_len;
                 let padding: String = std::iter::repeat_n(fillchar, pad_len).collect();
                 match side_owned.as_str() {
                     "left" => Scalar::Utf8(format!("{padding}{s}")),
@@ -4933,12 +4934,22 @@ impl DataFrame {
 
     /// Internal helper for corr/cov pairwise matrix computation.
     fn pairwise_stat(&self, stat: &str) -> Result<Self, FrameError> {
-        let n = self.column_order.len();
         let len = self.index.len();
 
-        // Extract f64 columns
-        let col_data: Vec<Vec<f64>> = self
+        // Only include numeric columns (Int64/Float64), matching pandas behavior
+        let numeric_cols: Vec<&String> = self
             .column_order
+            .iter()
+            .filter(|name| {
+                let dt = self.columns[name].dtype();
+                dt == DType::Int64 || dt == DType::Float64
+            })
+            .collect();
+
+        let n = numeric_cols.len();
+
+        // Extract f64 columns
+        let col_data: Vec<Vec<f64>> = numeric_cols
             .iter()
             .map(|name| {
                 let col = &self.columns[name];
@@ -4949,9 +4960,9 @@ impl DataFrame {
             .collect();
 
         let mut result_cols = BTreeMap::new();
-        for (j, col_j_name) in self.column_order.iter().enumerate() {
+        for (j, col_j_name) in numeric_cols.iter().enumerate() {
             let mut vals = Vec::with_capacity(n);
-            for (i, _col_i_name) in self.column_order.iter().enumerate() {
+            for (i, _col_i_name) in numeric_cols.iter().enumerate() {
                 // Compute pairwise stat between col_i and col_j
                 let mut sum_x = 0.0_f64;
                 let mut sum_y = 0.0_f64;
@@ -5001,20 +5012,21 @@ impl DataFrame {
                 vals.push(Scalar::Float64(val));
             }
             result_cols.insert(
-                col_j_name.clone(),
+                (*col_j_name).clone(),
                 Column::new(DType::Float64, vals)?,
             );
         }
 
-        let labels: Vec<IndexLabel> = self
-            .column_order
+        let numeric_col_order: Vec<String> =
+            numeric_cols.iter().map(|s| (*s).clone()).collect();
+        let labels: Vec<IndexLabel> = numeric_col_order
             .iter()
             .map(|s| IndexLabel::Utf8(s.clone()))
             .collect();
 
         Ok(Self {
             columns: result_cols,
-            column_order: self.column_order.clone(),
+            column_order: numeric_col_order,
             index: Index::new(labels),
         })
     }
@@ -5150,7 +5162,7 @@ impl DataFrame {
         let total = self.len();
         let sample_n = match (n, frac) {
             (Some(count), None) => count,
-            (None, Some(f)) => (total as f64 * f).ceil() as usize,
+            (None, Some(f)) => (total as f64 * f).round() as usize,
             (None, None) => 1,
             (Some(_), Some(_)) => {
                 return Err(FrameError::CompatibilityRejected(
@@ -5267,17 +5279,20 @@ impl DataFrame {
                 IndexLabel::Utf8(s) => s.clone(),
                 IndexLabel::Int64(v) => v.to_string(),
             };
-            if let Some(sep_pos) = label_str.rfind('|') {
-                let row_key = label_str[..sep_pos].to_string();
-                let col_key = label_str[sep_pos + 1..].to_string();
-                if row_set.insert(row_key.clone()) {
-                    row_order.push(row_key.clone());
-                }
-                if col_set.insert(col_key.clone()) {
-                    col_order.push(col_key.clone());
-                }
-                entries.push((row_key, col_key, val_col.values()[i].clone()));
+            let sep_pos = label_str.rfind('|').ok_or_else(|| {
+                FrameError::CompatibilityRejected(format!(
+                    "unstack: index label '{label_str}' missing '|' separator"
+                ))
+            })?;
+            let row_key = label_str[..sep_pos].to_string();
+            let col_key = label_str[sep_pos + 1..].to_string();
+            if row_set.insert(row_key.clone()) {
+                row_order.push(row_key.clone());
             }
+            if col_set.insert(col_key.clone()) {
+                col_order.push(col_key.clone());
+            }
+            entries.push((row_key, col_key, val_col.values()[i].clone()));
         }
 
         // Build lookup
