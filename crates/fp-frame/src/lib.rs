@@ -4937,13 +4937,14 @@ impl DataFrame {
         let len = self.index.len();
 
         // Only include numeric columns (Int64/Float64), matching pandas behavior
-        let numeric_cols: Vec<&String> = self
+        let numeric_cols: Vec<String> = self
             .column_order
             .iter()
             .filter(|name| {
-                let dt = self.columns[name].dtype();
+                let dt = self.columns[name.as_str()].dtype();
                 dt == DType::Int64 || dt == DType::Float64
             })
+            .cloned()
             .collect();
 
         let n = numeric_cols.len();
@@ -5012,21 +5013,19 @@ impl DataFrame {
                 vals.push(Scalar::Float64(val));
             }
             result_cols.insert(
-                (*col_j_name).clone(),
+                col_j_name.clone(),
                 Column::new(DType::Float64, vals)?,
             );
         }
 
-        let numeric_col_order: Vec<String> =
-            numeric_cols.iter().map(|s| (*s).clone()).collect();
-        let labels: Vec<IndexLabel> = numeric_col_order
+        let labels: Vec<IndexLabel> = numeric_cols
             .iter()
             .map(|s| IndexLabel::Utf8(s.clone()))
             .collect();
 
         Ok(Self {
             columns: result_cols,
-            column_order: numeric_col_order,
+            column_order: numeric_cols,
             index: Index::new(labels),
         })
     }
