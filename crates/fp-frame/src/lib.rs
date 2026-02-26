@@ -27366,11 +27366,11 @@ mod tests {
         let s = Series::from_values(
             "x",
             vec![0_i64.into()],
-            vec![Scalar::Float64(3.14)],
+            vec![Scalar::Float64(3.125)],
         )
         .unwrap();
         let json = s.to_json("records").unwrap();
-        assert!(json.contains("3.14"));
+        assert!(json.contains("3.125"));
     }
 
     // ── DataFrame scalar arithmetic ──
